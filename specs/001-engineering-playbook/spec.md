@@ -17,6 +17,13 @@
 - FR-013: Produtos derivados devem proibir LLM como dependencia de produto.
 - FR-014: O playbook deve oferecer CI reproduzindo comandos documentados.
 - FR-015: Migrações e bootstrap nao devem sobrescrever personalizacoes silenciosamente.
+- FR-016: O playbook deve fornecer um Project Requirements Document — PRD como fonte mestre de requisitos antes do Spec Kit.
+- FR-017: O bootstrap deve criar copia editavel do PRD em `docs/requirements/project-requirements.md` sem sobrescrever arquivo existente.
+- FR-018: O verificador deve validar regras objetivas do PRD, incluindo secoes, metadados, IDs, criterios de aceitacao, placeholders em aprovados e aprovacao humana.
+- FR-019: O playbook deve oferecer uma esteira segura de entrega Git com start, prepare, commit, publish, merge --auto e status.
+- FR-020: Operacoes remotas da esteira devem exigir autorizacao explicita, nunca usar force push e nunca publicar diretamente em main.
+- FR-021: A CI deve validar branch name, PR title, formatacao, lint, analise estatica, testes, schemas, policies, convergence, referencias e rastreabilidade.
+- FR-022: O playbook deve documentar um GitHub Ruleset proposto para proteger main sem aplica-lo remotamente.
 
 ## Non-Functional Requirements
 
@@ -42,4 +49,11 @@
 - AC-014: Titulos de PR seguem Conventional Commits.
 - AC-015: Nenhum produto derivado depende de LLM.
 - AC-016: Migracoes nao sobrescrevem personalizacoes silenciosamente.
-
+- AC-017: O template de PRD contem as secoes obrigatorias, front matter, ficha atomica de requisito, EARS, NFRs e rastreabilidade.
+- AC-018: `uv run python scripts/bootstrap.py` cria o PRD editavel quando ausente e nao altera quando presente.
+- AC-019: Fixtures de PRD validas passam e fixtures invalidas falham pelos motivos esperados.
+- AC-020: `scripts/delivery.py status` e read-only e nao consulta remoto.
+- AC-021: `scripts/delivery.py prepare` exige branch diferente de main e gera artefatos de entrega sem commit ou remoto.
+- AC-022: `scripts/delivery.py commit` exige prepare atual, arquivos staged, ownership, scan de secrets e Conventional Commit.
+- AC-023: `scripts/delivery.py publish` recusa main, exige commit local e atualiza PR de forma idempotente.
+- AC-024: `scripts/delivery.py merge --auto` exige PR, CI e autorizacao explicita para auto-merge squash.
