@@ -1,15 +1,15 @@
 schema_version: 1.0.0
-updated_at: '2026-09-07T21:58:24Z'
+updated_at: '2026-09-07T22:04:30Z'
 active_workstream: WS-001
-current_branch: fix/022-commit-message-file
+current_branch: fix/023-checkpoint-null-workstream
 current_phase: converge
 status: converged
 active_specification: specs/001-engineering-playbook/spec.md
 active_plan: specs/001-engineering-playbook/plan.md
 active_tasks: specs/001-engineering-playbook/tasks.md
 active_task: T017
-last_checkpoint: .project/checkpoints/CP-20260907-009.yml
-last_verified_commit: 89990676bd649e02b782372e5ee8910dd3c96e19
+last_checkpoint: .project/checkpoints/CP-20260907-010.yml
+last_verified_commit: 052a9f822dccb7464396ba18b3e70ea52b6550c8
 validation:
   passed:
   - uv sync --locked

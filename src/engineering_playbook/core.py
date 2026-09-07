@@ -608,10 +608,6 @@ def verify_root(root: Path) -> CheckResult:
             state_text = state_path.read_text(encoding="utf-8")
             for forbidden_text in [
                 "001-engineering-playbook",
-                "CP-20260907-001",
-                "CP-20260907-002",
-                "CP-20260907-003",
-                "CP-20260907-004",
                 "24e3d92b4c8866732aa6b98bd630f414e4cb93b1",
             ]:
                 result.add(
@@ -663,7 +659,7 @@ def verify_root(root: Path) -> CheckResult:
             "bootstrap-engineering-template.yml",
             "specs/001-engineering-playbook",
             "tests/fixtures",
-            ".project/checkpoints/CP-20260907",
+            ".project/checkpoints/CP-",
         ]:
             result.add(
                 forbidden not in resources_text,
