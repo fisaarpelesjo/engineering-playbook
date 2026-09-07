@@ -316,7 +316,10 @@ def command_commit(args: argparse.Namespace) -> int:
         print(f"ERROR: invalid Conventional Commit title: {title}")
         return 1
     prepare = load_yaml(args.root / PREPARE_FILE)
-    completed = run(args.root, ["git", "commit", "-m", title, "-m", prepare["body"]])
+    message_file = args.root / ".project/delivery/commit-message.txt"
+    message_file.parent.mkdir(parents=True, exist_ok=True)
+    message_file.write_text(f"{title}\n\n{prepare['body']}", encoding="utf-8", newline="\n")
+    completed = run(args.root, ["git", "commit", "-F", str(message_file)])
     if completed.returncode != 0:
         print(completed.stderr.strip())
         return completed.returncode
