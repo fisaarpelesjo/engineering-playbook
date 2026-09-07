@@ -1,0 +1,78 @@
+schema_version: 1.0.0
+checkpoint_id: CP-20260907-004
+created_at: '2026-09-07T20:34:41Z'
+workstream: WS-001
+task: T017
+branch: main
+head: 24e3d92b4c8866732aa6b98bd630f414e4cb93b1
+working_tree:
+  status: dirty
+  modified_paths:
+  - M .cursor/rules/engineering.mdc
+  - ' M .devin/rules/engineering.md'
+  - ' M .github/copilot-instructions.md'
+  - ' M .github/pull_request_template.md'
+  - ' M .github/workflows/quality.yml'
+  - ' M .gitignore'
+  - ' M .project/project.yml'
+  - ' M .project/schemas/state.schema.json'
+  - ' M .project/state.yml'
+  - ' M AGENTS.md'
+  - ' M CLAUDE.md'
+  - ' M CONTRIBUTING.md'
+  - ' M ENGINEERING.md'
+  - ' M GEMINI.md'
+  - ' M README.md'
+  - ' M THIRD_PARTY_NOTICES.md'
+  - ' M docs/agents/RECOVERY_PROTOCOL.md'
+  - ' M scripts/bootstrap.py'
+  - ' M scripts/checkpoint.py'
+  - ' M scripts/playbook_core.py'
+  - ' M specs/001-engineering-playbook/convergence.md'
+  - ' M specs/001-engineering-playbook/plan.md'
+  - ' M specs/001-engineering-playbook/spec.md'
+  - ' M specs/001-engineering-playbook/tasks.md'
+  - ' M templates/project/README.md'
+  - ' M tests/unit/test_core.py'
+  - ?? .github/rulesets/
+  - ?? .project/checkpoints/CP-20260907-002.yml
+  - ?? .project/checkpoints/CP-20260907-003.yml
+  - ?? .project/distribution.yml
+  - ?? docs/delivery/
+  - ?? docs/requirements/
+  - ?? scripts/delivery.py
+  - ?? templates/project/requirements.md
+  - ?? tests/fixtures/requirements/
+completed_work:
+- Implemented playbook artifacts or recorded current progress.
+commands:
+- uv sync --locked
+- uv run ruff format --check .
+- uv run ruff check .
+- uv run pyright
+- uv run pytest
+- uv run python scripts/verify.py
+- uv run python scripts/doctor.py
+- uv run python scripts/resume.py
+- uv run python scripts/reconcile.py
+- uv run python scripts/bootstrap.py
+- uv run python scripts/delivery.py status
+- uv run python scripts/checkpoint.py
+validation:
+  passed:
+  - uv sync --locked
+  - uv run ruff format --check .
+  - uv run ruff check .
+  - uv run pyright
+  - uv run pytest
+  - uv run python scripts/verify.py
+  - uv run python scripts/doctor.py
+  - uv run python scripts/resume.py
+  - uv run python scripts/reconcile.py
+  - uv run python scripts/bootstrap.py
+  - uv run python scripts/delivery.py status
+  - uv run python scripts/checkpoint.py
+  failed: []
+  not_run: []
+blockers: []
+next_action: Retomar com uv run python scripts/resume.py antes de novas mudancas.

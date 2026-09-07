@@ -11,4 +11,9 @@
 - T009: Criar CI e configuracao de qualidade. Refs: FR-014.
 - T010: Criar testes unitarios e fixtures. Refs: AC-002, AC-003, AC-004, AC-006, AC-007.
 - T011: Executar validações, revisão, convergência e checkpoint. Refs: AC-001..AC-016.
-
+- T012: Criar template e guia do Project Requirements Document — PRD. Refs: FR-016, AC-017.
+- T013: Integrar copia idempotente do PRD no bootstrap. Refs: FR-017, AC-018.
+- T014: Estender verify e testes para validacao objetiva do PRD. Refs: FR-018, AC-019.
+- T015: Implementar `scripts/delivery.py` com start, prepare, commit, publish, merge --auto e status. Refs: FR-019, FR-020, AC-020..AC-024.
+- T016: Atualizar CI para validar politicas de entrega, branch name, PR title e convergence. Refs: FR-021.
+- T017: Documentar e versionar ruleset declarativo de protecao da main. Refs: FR-022.
