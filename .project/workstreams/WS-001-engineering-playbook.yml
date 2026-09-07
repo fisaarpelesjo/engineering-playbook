@@ -1,0 +1,21 @@
+id: "WS-001"
+role: "coordinator"
+status: "in_progress"
+branch: "main"
+worktree: "."
+objective: "Implementar briefing completo do engineering playbook."
+owned_paths:
+  - "."
+forbidden_paths:
+  - ".git"
+requirements:
+  - "bootstrap-engineering-template.yml"
+validation_commands:
+  - "uv run pytest"
+  - "uv run python scripts/verify.py"
+handoff:
+  next_action: "Run resume and continue validation."
+started_at: "2026-09-07T00:00:00Z"
+last_updated_at: "2026-09-07T00:00:00Z"
+owner: "codex"
+

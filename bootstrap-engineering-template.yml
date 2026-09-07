@@ -1,0 +1,1055 @@
+schema_version: "2.0.0"
+
+briefing:
+  id: "bootstrap-engineering-playbook"
+  title: "Implementar playbook reutilizável para desenvolvimento assistido por agentes"
+  language: "pt-BR"
+  execution_mode: "implementation"
+  target_repository: "current"
+
+objective:
+  summary: >-
+    Criar um Engineering Playbook reutilizável para projetos independentes de
+    portfólio. O playbook deve usar GitHub Spec Kit como núcleo de SDD e
+    acrescentar TDD seletivo, MADR, revisão independente, subagentes isolados,
+    estado versionado, checkpoints, retomada, reconciliação, CI, benchmarks e
+    governança de Git.
+  outcome: >-
+    Um repositório capaz de inicializar e governar projetos separados em
+    Python, C++, CUDA, Rust, Go, TypeScript, Java, C#, Kotlin, Swift, R, Julia
+    e SQL, sem reunir essas stacks em um monorepo.
+  methodology_statement: >-
+    SDD define o que construir; TDD orienta a implementação verificável; MADR
+    registra decisões relevantes; CI executa validações reproduzíveis; estado
+    versionado preserva continuidade entre sessões, computadores e agentes.
+
+principles:
+  - id: "P-001"
+    name: "repository_as_memory"
+    rule: >-
+      O repositório é a fonte de verdade. Histórico de chat, auto memory e
+      sessões nativas são conveniências e nunca a única memória do projeto.
+  - id: "P-002"
+    name: "specification_before_implementation"
+    rule: "Mudanças não triviais exigem intenção, escopo e critérios verificáveis."
+  - id: "P-003"
+    name: "evidence_before_completion"
+    rule: "Nenhuma tarefa termina sem evidência real das verificações aplicáveis."
+  - id: "P-004"
+    name: "single_source_per_responsibility"
+    rule: "Não duplicar regras canônicas entre adaptadores de agentes."
+  - id: "P-005"
+    name: "right_sized_process"
+    rule: "A profundidade do processo deve ser proporcional ao risco."
+  - id: "P-006"
+    name: "human_authority"
+    rule: >-
+      Agentes não ampliam escopo, publicam, apagam dados, alteram requisitos
+      materiais ou assumem permissões sem autorização.
+  - id: "P-007"
+    name: "no_llm_in_products"
+    rule: >-
+      IA pode auxiliar o desenvolvimento, mas produtos derivados não consomem
+      APIs de LLM nem incorporam modelos de linguagem locais.
+  - id: "P-008"
+    name: "honest_evidence"
+    rule: "Nunca inventar testes, benchmarks, citações, autoria ou coautoria."
+
+reuse:
+  direct:
+    github_spec_kit:
+      purpose: "Núcleo SDD"
+      source: "https://github.com/github/spec-kit"
+      rules:
+        - "Usar release estável fixada, nunca branch móvel em automação."
+        - "Registrar versão exata em .project/project.yml."
+        - "Usar integrações oficiais quando disponíveis."
+        - "Não reimplementar constitution, specify, plan, tasks, implement ou converge."
+        - "Preservar avisos de licença."
+      flow:
+        - "constitution"
+        - "specify"
+        - "clarify"
+        - "plan"
+        - "tasks"
+        - "implement"
+        - "converge"
+    agents_md:
+      purpose: "Entrada portátil para agentes"
+      source: "https://agents.md/"
+    madr:
+      purpose: "Registros de decisões"
+      source: "https://adr.github.io/madr/"
+      license_policy: "Registrar origem e licença em THIRD_PARTY_NOTICES.md."
+    conventional_commits:
+      source: "https://www.conventionalcommits.org/en/v1.0.0/"
+    semantic_versioning:
+      source: "https://semver.org/spec/v2.0.0.html"
+    keep_a_changelog:
+      source: "https://keepachangelog.com/"
+    pre_commit:
+      source: "https://pre-commit.com/"
+      rule: "Opcional localmente; CI permanece obrigatória."
+    json_schema:
+      source: "https://json-schema.org/"
+  concepts_only:
+    openspec:
+      borrow:
+        - "separação de mudança proposta e estado aprovado"
+        - "verify e archive"
+      do_not_install: true
+    bmad:
+      borrow:
+        - "processo proporcional ao risco"
+        - "papéis especializados sob demanda"
+      do_not_install: true
+    agent_os:
+      borrow:
+        - "padrões separados por stack"
+        - "descoberta de convenções em código existente"
+      do_not_install: true
+
+inputs:
+  project_name:
+    default: "engineering-playbook"
+  spec_kit_version:
+    default: null
+    resolution: >-
+      Se ausente, consultar releases oficiais, escolher a versão estável mais
+      recente, registrar a tag exata e parar se a origem não puder ser verificada.
+  supported_agents:
+    default:
+      - "codex"
+      - "claude-code"
+      - "gemini-cli"
+      - "github-copilot"
+      - "cursor"
+      - "windsurf"
+  default_workflow_profile:
+    default: "standard"
+  remote_operations:
+    default: false
+
+scope:
+  included:
+    - "playbook canônico"
+    - "preset ou extensão para Spec Kit"
+    - "perfis lite, standard e strict"
+    - "perfis das stacks planejadas"
+    - "adaptadores dos agentes suportados"
+    - "reviewer, subagentes, handoffs, branches e worktrees"
+    - "estado versionado, checkpoint, resume, reconcile e doctor"
+    - "schemas JSON para YAMLs operacionais"
+    - "templates MADR, benchmark, PR e issues"
+    - "Git, CI, changelog e releases"
+    - "fixtures e testes do próprio playbook"
+  excluded:
+    - "implementação dos projetos finais"
+    - "monorepo com as stacks finais"
+    - "LLM em produtos derivados"
+    - "instalação de OpenSpec, BMAD ou Agent OS"
+    - "operação remota sem autorização"
+    - "credenciais, tokens ou secrets"
+
+runtime:
+  python: ">=3.11"
+  package_manager: "uv"
+  dependencies:
+    runtime:
+      PyYAML: "ler e escrever YAML com segurança"
+      jsonschema: "validar YAML contra JSON Schema"
+    development:
+      pytest: "testes"
+      ruff: "lint e formatação"
+      pyright: "análise estática"
+  rules:
+    - "Fixar dependências em uv.lock."
+    - "Não adicionar framework web, banco ou serviço externo."
+    - "Separar dependências runtime e development."
+
+repository:
+  directories:
+    - ".github/ISSUE_TEMPLATE"
+    - ".github/workflows"
+    - ".cursor/rules"
+    - ".devin/rules"
+    - ".project/checkpoints"
+    - ".project/schemas"
+    - ".project/workstreams"
+    - "docs/agents"
+    - "docs/context"
+    - "docs/decisions"
+    - "docs/standards/common"
+    - "docs/standards/stacks"
+    - "extensions"
+    - "profiles/stacks"
+    - "profiles/workflows"
+    - "scripts"
+    - "specs"
+    - "templates/benchmark"
+    - "templates/madr"
+    - "templates/project"
+    - "tests/fixtures"
+    - "tests/unit"
+  files:
+    README.md: "Visão, instalação, uso, continuidade e limitações."
+    ENGINEERING.md: "Fonte canônica do processo."
+    AGENTS.md: "Entrada principal portátil para agentes."
+    CLAUDE.md: "Adaptador conciso para Claude Code."
+    GEMINI.md: "Adaptador conciso para Gemini CLI."
+    REVIEW.md: "Orientação específica de code review."
+    CONTRIBUTING.md: "Branches, commits, PRs e Definition of Done."
+    CHANGELOG.md: "Keep a Changelog."
+    MIGRATIONS.md: "Migrações entre versões do playbook."
+    SECURITY.md: "Relato de vulnerabilidades e limites."
+    LICENSE: "Licença do playbook."
+    THIRD_PARTY_NOTICES.md: "Origens e licenças reutilizadas."
+    pyproject.toml: "Dependências e configurações."
+    uv.lock: "Ambiente reproduzível."
+    .pre-commit-config.yaml: "Hooks locais opcionais."
+    .gitignore: "Caches, sessões locais, secrets e artefatos."
+    .github/copilot-instructions.md: "Adaptador para Copilot."
+    .github/pull_request_template.md: "PR verificável."
+    .github/ISSUE_TEMPLATE/feature.yml: "Intake de features."
+    .github/ISSUE_TEMPLATE/bug.yml: "Intake de bugs."
+    .github/workflows/quality.yml: "CI do playbook."
+    .cursor/rules/engineering.mdc: "Regra Always Apply do Cursor."
+    .devin/rules/engineering.md: "Regra atual de Windsurf/Cascade."
+    docs/agents/AGENT_POLICY.md: "Papéis, permissões e delegação."
+    docs/agents/HANDOFF_PROTOCOL.md: "Troca segura de agente ou sessão."
+    docs/agents/RECOVERY_PROTOCOL.md: "Recuperação após interrupção."
+    docs/context/product.md: "Objetivo e usuários."
+    docs/context/architecture.md: "Componentes, limites e fluxo."
+    docs/context/terminology.md: "Vocabulário canônico."
+    docs/context/constraints.md: "Restrições permanentes."
+    docs/decisions/0000-use-madr.md: "Adoção de MADR."
+    .project/project.yml: "Identidade, versões, comandos e fontes."
+    .project/state.yml: "Estado operacional retomável."
+    .project/schemas/project.schema.json: "Schema do projeto."
+    .project/schemas/state.schema.json: "Schema do estado."
+    .project/schemas/workstream.schema.json: "Schema dos workstreams."
+    .project/schemas/checkpoint.schema.json: "Schema dos checkpoints."
+    .project/schemas/benchmark.schema.json: "Schema de benchmarks."
+    profiles/workflows/lite.yml: "Processo de baixo risco."
+    profiles/workflows/standard.yml: "Processo padrão."
+    profiles/workflows/strict.yml: "Processo de alto risco."
+    profiles/stacks/README.md: "Contrato dos perfis de stack."
+    scripts/bootstrap.py: "Aplicar playbook sem overwrite silencioso."
+    scripts/verify.py: "Validar estrutura, schemas e referências."
+    scripts/doctor.py: "Diagnosticar ambiente e saúde."
+    scripts/checkpoint.py: "Persistir progresso e próximo passo."
+    scripts/resume.py: "Reconstruir contexto sem escrita."
+    scripts/reconcile.py: "Detectar e corrigir estado somente com --apply."
+    scripts/migrate.py: "Migrar versões sem apagar personalizações."
+
+workflow_profiles:
+  selection_rules:
+    - "Classificar antes de criar artefatos."
+    - "Escalar para strict quando houver gatilho de risco."
+    - "Reduzir perfil exige justificativa humana."
+  lite:
+    use_for:
+      - "documentação sem mudança comportamental"
+      - "manutenção trivial"
+      - "configuração reversível de baixo risco"
+    required:
+      - "issue ou tarefa"
+      - "critério de validação"
+      - "resultado da validação"
+    reviewer: "optional"
+  standard:
+    use_for:
+      - "funcionalidade normal"
+      - "correção não crítica"
+      - "refatoração delimitada"
+    required:
+      - "specification"
+      - "plan"
+      - "tasks"
+      - "tests"
+      - "review"
+      - "convergence"
+    reviewer: "required"
+  strict:
+    triggers:
+      - "API pública"
+      - "arquitetura"
+      - "segurança ou privacidade"
+      - "persistência ou migração"
+      - "concorrência ou distribuição"
+      - "CUDA, memória ou performance crítica"
+      - "portabilidade"
+      - "mudança cara de reverter"
+    required:
+      - "specification"
+      - "clarification"
+      - "research when uncertain"
+      - "plan"
+      - "MADR"
+      - "tasks"
+      - "tests"
+      - "independent review"
+      - "benchmark when applicable"
+      - "convergence"
+      - "release notes"
+    reviewer: "independent_required"
+
+workflows:
+  feature:
+    - "classify"
+    - "specify"
+    - "clarify"
+    - "plan"
+    - "tasks"
+    - "implement"
+    - "validate"
+    - "review"
+    - "converge"
+    - "archive_or_release"
+  bug:
+    - "intake"
+    - "reproduce"
+    - "diagnose"
+    - "write_regression_test"
+    - "fix"
+    - "validate"
+    - "review"
+    - "converge"
+  performance:
+    - "define_metric"
+    - "capture_baseline"
+    - "profile"
+    - "state_hypothesis"
+    - "optimize"
+    - "benchmark"
+    - "verify_correctness"
+    - "review"
+  refactor:
+    - "characterize_behavior"
+    - "establish_tests"
+    - "refactor_incrementally"
+    - "validate_no_behavior_change"
+    - "review"
+  research_spike:
+    - "state_question"
+    - "define_timebox"
+    - "research_primary_sources"
+    - "prototype_if_needed"
+    - "record_evidence"
+    - "decide_discard_or_formalize"
+
+tdd:
+  required_for:
+    - "reproducible bug fixes"
+    - "deterministic algorithms"
+    - "parsers and tokenizers"
+    - "serialization"
+    - "business rules"
+    - "data structures"
+  selective_for:
+    - "configuration"
+    - "external integrations"
+    - "hardware exploration"
+    - "disposable prototypes"
+    - "experimental optimization"
+  cycle:
+    - "red"
+    - "green"
+    - "refactor"
+  anti_gaming:
+    - "Não alterar requisito para acomodar código defeituoso."
+    - "Não enfraquecer asserções apenas para passar."
+    - "Não mockar a unidade sob teste."
+    - "Preferir comportamento público e propriedades."
+
+adr:
+  format: "MADR"
+  directory: "docs/decisions"
+  filename: "NNNN-short-kebab-title.md"
+  statuses:
+    - "proposed"
+    - "accepted"
+    - "rejected"
+    - "deprecated"
+    - "superseded"
+  triggers:
+    - "arquitetura"
+    - "dependência relevante"
+    - "contrato público"
+    - "formato persistido"
+    - "segurança, desempenho ou portabilidade"
+    - "decisão difícil de reverter"
+  fields:
+    - "context and problem statement"
+    - "decision drivers"
+    - "considered options"
+    - "decision outcome"
+    - "positive consequences"
+    - "negative consequences"
+    - "evidence"
+
+agents:
+  canonical:
+    entrypoint: "AGENTS.md"
+    engineering: "ENGINEERING.md"
+    orchestration: "docs/agents/AGENT_POLICY.md"
+    state: ".project/state.yml"
+  context_loading:
+    always:
+      - "AGENTS.md"
+      - ".project/project.yml"
+      - ".project/state.yml"
+    active_only:
+      - "active specification"
+      - "active plan"
+      - "active tasks"
+      - "applicable ADRs"
+      - "selected stack profile"
+    on_demand:
+      - "archives"
+      - "old checkpoints"
+      - "unrelated ADRs"
+      - "historical benchmarks"
+    never_store:
+      - "full transcripts"
+      - "chain-of-thought"
+      - "secrets or tokens"
+      - "personal data"
+  adapters:
+    codex:
+      file: "AGENTS.md"
+    claude_code:
+      file: "CLAUDE.md"
+      reviewer_file: "REVIEW.md"
+    gemini_cli:
+      file: "GEMINI.md"
+    github_copilot:
+      file: ".github/copilot-instructions.md"
+    cursor:
+      file: ".cursor/rules/engineering.mdc"
+      requirement: "valid frontmatter and alwaysApply true"
+    windsurf:
+      file: ".devin/rules/engineering.md"
+  adapter_rules:
+    - "Referenciar fontes canônicas; não copiar ENGINEERING.md inteiro."
+    - "Informar bootstrap, resume, verify e checkpoint."
+    - "Apontar para state.yml e trabalho ativo."
+    - "Não alegar carregamento automático não documentado."
+
+roles:
+  coordinator:
+    purpose: "Classificar, planejar, delegar, integrar e reportar."
+    always_required: true
+    cannot:
+      - "aprovar independentemente o próprio trabalho"
+      - "ocultar conflitos"
+  implementer:
+    purpose: "Implementar somente o escopo atribuído."
+    obligations:
+      - "respeitar ownership"
+      - "executar verificações"
+      - "relatar limitações"
+  reviewer:
+    purpose: "Procurar defeitos e divergências antes da aprovação."
+    default_mode: "read_only"
+    priorities:
+      - "correctness"
+      - "requirements compliance"
+      - "security and privacy"
+      - "regressions"
+      - "missing or weak tests"
+      - "performance and portability"
+      - "maintainability"
+    finding_fields:
+      - "severity"
+      - "location"
+      - "evidence"
+      - "impact"
+      - "recommendation"
+    severities:
+      - "blocker"
+      - "high"
+      - "medium"
+      - "low"
+    verdicts:
+      - "approved"
+      - "approved_with_notes"
+      - "changes_requested"
+      - "blocked"
+    independence: >-
+      Preferir outro agente ou contexto. Com agente único, executar passagem de
+      revisão somente leitura antes de permitir correções.
+  test_engineer:
+    purpose: "Aceitação, propriedades, casos extremos e regressões."
+    on_demand: true
+  benchmark_engineer:
+    purpose: "Medições reproduzíveis e dados brutos."
+    on_demand: true
+  security_reviewer:
+    purpose: "Threat model, dependências, secrets e superfícies de ataque."
+    on_demand: true
+  researcher:
+    purpose: "Documentação primária e comparação de alternativas."
+    default_mode: "read_only"
+    on_demand: true
+
+subagents:
+  default: "somente trabalho independente, delimitado e vantajoso"
+  allowed:
+    - "pesquisas independentes"
+    - "módulos distintos"
+    - "testes independentes"
+    - "revisões especializadas"
+    - "arquivos não sobrepostos"
+  prohibited:
+    - "tarefas triviais"
+    - "edição concorrente do mesmo arquivo"
+    - "arquitetura ainda indefinida"
+    - "paralelismo sem benefício"
+  delegation_contract:
+    - "workstream_id"
+    - "role"
+    - "objective"
+    - "scope"
+    - "owned_paths"
+    - "forbidden_paths"
+    - "inputs"
+    - "constraints"
+    - "expected_output"
+    - "validation_commands"
+    - "stop_conditions"
+    - "handoff_target"
+  isolation:
+    default: "separate worktree and branch for concurrent writers"
+    rules:
+      - "No máximo um writer ativo por arquivo."
+      - "Cada writer concorrente usa worktree e branch próprios."
+      - "Researcher e reviewer são read-only por padrão."
+      - "Coordinator revisa commits antes de integrar."
+      - "Não criar worktree para tarefa pequena e sequencial."
+
+state:
+  file: ".project/state.yml"
+  schema: ".project/schemas/state.schema.json"
+  fields:
+    - "schema_version"
+    - "updated_at"
+    - "active_workstream"
+    - "current_branch"
+    - "current_phase"
+    - "status"
+    - "active_specification"
+    - "active_plan"
+    - "active_tasks"
+    - "active_task"
+    - "last_checkpoint"
+    - "last_verified_commit"
+    - "validation"
+    - "blockers"
+    - "next_actions"
+  statuses:
+    normal:
+      - "proposed"
+      - "clarified"
+      - "planned"
+      - "ready"
+      - "in_progress"
+      - "review"
+      - "changes_requested"
+      - "verified"
+      - "converged"
+      - "done"
+      - "archived"
+    lateral:
+      - "blocked"
+      - "paused"
+      - "abandoned"
+      - "superseded"
+  transitions:
+    - "Definir transições válidas no validador."
+    - "Recusar planned -> done."
+    - "Recusar verified quando commit verificado não corresponde ao HEAD."
+    - "Exigir motivo para blocked, abandoned e superseded."
+  truth_order:
+    - "approved specs and ADRs"
+    - "Git state"
+    - ".project/state.yml"
+    - "latest valid checkpoint"
+    - "native agent session"
+    - "agent auto memory"
+  local_only:
+    directory: ".project/local"
+    gitignored: true
+    allowed:
+      - "session ids"
+      - "machine paths"
+      - "temporary notes without secrets"
+    cannot_be_source_of_truth: true
+
+checkpoint:
+  command: "uv run python scripts/checkpoint.py"
+  behavior: "atomic write of validated state and checkpoint"
+  create_when:
+    - "before stopping"
+    - "before switching agent or branch"
+    - "after material milestone"
+    - "when blocked"
+    - "before review"
+  capture:
+    - "UTC timestamp"
+    - "workstream and task"
+    - "branch and HEAD"
+    - "working tree status and modified paths"
+    - "completed work"
+    - "commands actually executed"
+    - "passed, failed and not-run validations"
+    - "blockers"
+    - "one concrete next action"
+  rules:
+    - "Nunca fazer commit ou push automaticamente."
+    - "Permitir WIP somente em branch curta; squash remove da main."
+    - "Persistência forte exige commit e, quando autorizado, push."
+
+resume:
+  command: "uv run python scripts/resume.py"
+  mode: "strictly_read_only"
+  behavior:
+    - "Validar project.yml, state.yml e checkpoint."
+    - "Comparar branch, HEAD, git status e commit verificado."
+    - "Confirmar spec, plan, tasks e ADRs."
+    - "Detectar tarefas inconsistentes."
+    - "Produzir contexto conciso e determinístico."
+    - "Parar antes de implementar se houver divergência material."
+  formats:
+    - "human"
+    - "markdown"
+    - "json"
+  user_command: >-
+    Leia AGENTS.md, execute o protocolo de retomada, reconcilie o estado
+    versionado com o Git e continue a tarefa ativa. Não implemente antes de
+    informar divergências materiais.
+
+reconcile:
+  inspect: "uv run python scripts/reconcile.py"
+  apply: "uv run python scripts/reconcile.py --apply"
+  default_mode: "read_only"
+  detect:
+    - "branch or HEAD mismatch"
+    - "unexpected dirty tree"
+    - "stale state"
+    - "invalid task IDs"
+    - "stale verified commit"
+    - "ownerless workstream"
+    - "overlapping ownership"
+  safety:
+    - "Nunca executar --apply implicitamente."
+    - "Nunca descartar alterações locais."
+    - "Nunca trocar branch de forma insegura."
+    - "Pedir decisão humana para reconciliação ambígua ou destrutiva."
+
+doctor:
+  command: "uv run python scripts/doctor.py"
+  default_mode: "read_only"
+  checks:
+    - "Python, uv and locked dependencies"
+    - "pinned Spec Kit version"
+    - "required files and schemas"
+    - "canonical references and internal links"
+    - "forgotten placeholders"
+    - "valid state transitions"
+    - "branch, workstreams and ownership"
+    - "checkpoint presence"
+    - "stack commands"
+    - "CI configuration"
+    - "tracked sensitive files"
+
+workstreams:
+  directory: ".project/workstreams"
+  filename: "WS-NNN-short-title.yml"
+  fields:
+    - "id"
+    - "role"
+    - "status"
+    - "branch"
+    - "worktree"
+    - "objective"
+    - "owned_paths"
+    - "forbidden_paths"
+    - "requirements"
+    - "validation_commands"
+    - "handoff"
+    - "started_at"
+    - "last_updated_at"
+    - "owner"
+  stale_rule: "doctor warns but never reassigns automatically"
+
+handoff:
+  fields:
+    - "from_agent_or_role"
+    - "to_agent_or_role"
+    - "reason"
+    - "workstream"
+    - "active_task"
+    - "allowed_actions"
+    - "forbidden_actions"
+    - "required_context"
+    - "current_commit"
+    - "validation_state"
+    - "next_action"
+  rules:
+    - "Criar checkpoint antes do handoff."
+    - "Receptor executa resume antes de agir."
+    - "Receptor verifica o repositório e não confia somente no resumo."
+    - "Reviewer recebe read-only salvo autorização."
+
+traceability:
+  chain: "requirement -> acceptance criterion -> task -> test/evidence"
+  identifiers:
+    requirement: "FR-NNN"
+    non_functional: "NFR-NNN"
+    constraint: "CON-NNN"
+    success: "SC-NNN"
+    task: "TNNN"
+    test: "TEST-NNN"
+    benchmark: "BENCH-NNN"
+    decision: "ADR-NNNN"
+    checkpoint: "CP-YYYYMMDD-NNN"
+    workstream: "WS-NNN"
+  rules:
+    - "Todo FR possui critério de aceitação."
+    - "Todo FR implementado possui tarefa e evidência."
+    - "Toda tarefa funcional indica verificação."
+    - "Todo NFR de performance referencia benchmark."
+    - "IDs são únicos e referências existem."
+
+benchmarks:
+  metadata:
+    - "benchmark_id"
+    - "objective"
+    - "hypothesis"
+    - "git_commit"
+    - "hardware"
+    - "operating_system"
+    - "runtime_or_compiler_versions"
+    - "input_or_dataset"
+    - "warmup"
+    - "iterations"
+    - "metrics"
+    - "raw_results_path"
+    - "limitations"
+  rules:
+    - "Não editar dados brutos para melhorar resultados."
+    - "Não comparar ambientes incompatíveis sem ressalva."
+    - "Separar baseline, hipótese e resultado."
+    - "Reportar variabilidade quando aplicável."
+    - "Verificar correção antes da performance."
+
+git:
+  strategy: "trunk based with short-lived branches"
+  main:
+    protections:
+      - "required PR and CI when remote supports them"
+      - "no force push"
+      - "no deletion"
+  avoid: "permanent develop branch for solo projects"
+  branch_format: "<type>/<spec-or-issue>-<short-kebab-description>"
+  branch_types:
+    - "feat"
+    - "fix"
+    - "perf"
+    - "refactor"
+    - "test"
+    - "docs"
+    - "build"
+    - "ci"
+    - "chore"
+    - "spike"
+  examples:
+    - "feat/001-tensor-core"
+    - "fix/014-unicode-roundtrip"
+    - "perf/021-parallel-pair-counting"
+    - "spike/005-cuda-memory-layout"
+  merge:
+    default: "squash"
+    rule: "PR title becomes final commit title."
+    gates:
+      - "CI passed"
+      - "review satisfied"
+      - "no conflicts"
+      - "spec convergence"
+      - "real evidence"
+
+commits:
+  specification: "Conventional Commits 1.0.0"
+  format: "<type>(<optional-scope>): <imperative-summary>"
+  language: "English"
+  types:
+    - "feat"
+    - "fix"
+    - "perf"
+    - "refactor"
+    - "test"
+    - "docs"
+    - "build"
+    - "ci"
+    - "chore"
+    - "revert"
+  title_rules:
+    - "imperative"
+    - "lowercase after colon"
+    - "no trailing period"
+    - "prefer at most 72 characters"
+    - "one cohesive change"
+  body: "Explicar por que, trade-offs e limitações; não repetir o diff."
+  footers:
+    - "Referenciar requirements, issues e ADRs."
+    - "Usar BREAKING CHANGE para incompatibilidade."
+    - "Não adicionar coautoria de IA automática ou enganosa."
+  enforcement:
+    base: "Python validator for every stack"
+    optional: "commitlint for JS/TS"
+
+pull_requests:
+  title: "Conventional Commits; becomes squash commit title"
+  description_language: "pt-BR unless project decides otherwise"
+  sections:
+    - "Summary"
+    - "Problem and motivation"
+    - "Specification and requirements"
+    - "Changes"
+    - "Validation evidence"
+    - "Benchmarks when applicable"
+    - "Risks and limitations"
+    - "Reviewer checklist"
+  forbidden_titles:
+    - "updates"
+    - "changes"
+    - "fix stuff"
+    - "work in progress"
+    - "implement feature"
+  rules:
+    - "Somente comandos realmente executados."
+    - "Não fabricar logs, screenshots ou números."
+    - "Descrição compreensível sem histórico do chat."
+
+releases:
+  versioning: "Semantic Versioning 2.0.0"
+  changelog: "Keep a Changelog"
+  gates:
+    - "converged state"
+    - "required validations passed"
+    - "review allows release"
+    - "CHANGELOG updated"
+    - "limitations documented"
+    - "migration notes when needed"
+  rule: "Never tag or publish without explicit authorization."
+
+ci:
+  provider: "GitHub Actions"
+  permissions: "read-only by default"
+  triggers:
+    - "push"
+    - "pull_request"
+  jobs:
+    - "validate schemas"
+    - "lint and format"
+    - "static analysis"
+    - "unit tests"
+    - "fixture tests"
+    - "policy validation"
+  commands:
+    - "uv sync --locked"
+    - "uv run ruff format --check ."
+    - "uv run ruff check ."
+    - "uv run pyright"
+    - "uv run pytest"
+    - "uv run python scripts/verify.py"
+  security:
+    - "No secrets."
+    - "Explicit minimum permissions."
+    - "Pin actions by SHA or documented controlled policy."
+    - "Justify third-party actions."
+  disclaimer: "CI is evidence of executed checks, not proof of no defects."
+
+stack_profiles:
+  required:
+    - "python"
+    - "cpp"
+    - "cuda"
+    - "rust"
+    - "go"
+    - "typescript"
+    - "java"
+    - "dotnet"
+    - "kotlin"
+    - "swift"
+    - "r"
+    - "julia"
+    - "sql"
+  fields:
+    - "id"
+    - "supported_platforms"
+    - "prerequisites"
+    - "setup_command"
+    - "format_command"
+    - "lint_command"
+    - "build_command"
+    - "test_command"
+    - "static_analysis_command"
+    - "benchmark_command_when_applicable"
+    - "ci_notes"
+  rules:
+    - "Usar placeholders explícitos quando depender do projeto."
+    - "Não inventar ferramenta obrigatória sem justificativa."
+    - "Swift/iOS registra dependência de macOS."
+    - "CUDA registra GPU NVIDIA e toolkit compatível."
+
+commands:
+  bootstrap: "uv run python scripts/bootstrap.py"
+  verify: "uv run python scripts/verify.py"
+  doctor: "uv run python scripts/doctor.py"
+  checkpoint: "uv run python scripts/checkpoint.py"
+  resume: "uv run python scripts/resume.py"
+  reconcile_inspect: "uv run python scripts/reconcile.py"
+  reconcile_apply: "uv run python scripts/reconcile.py --apply"
+  tests: "uv run pytest"
+
+tests:
+  unit:
+    - "schema loading"
+    - "state transitions"
+    - "identifier uniqueness"
+    - "traceability resolution"
+    - "Git state parsing"
+    - "context generation"
+    - "commit and PR title validation"
+  fixtures:
+    - "valid-project"
+    - "missing-spec"
+    - "stale-checkpoint"
+    - "wrong-branch"
+    - "dirty-working-tree"
+    - "missing-test-reference"
+    - "duplicate-requirement-id"
+    - "invalid-state-transition"
+    - "conflicting-agent-rules"
+    - "overlapping-workstream-ownership"
+    - "outdated-verified-commit"
+    - "forgotten-placeholder"
+  behavior:
+    - "resume never modifies fixtures"
+    - "reconcile without --apply never modifies fixtures"
+    - "doctor is read-only by default"
+    - "checkpoint writes atomically or not at all"
+    - "failure returns nonzero with actionable message"
+
+definition_of_ready:
+  - "Objetivo, escopo e workflow profile claros."
+  - "Requisitos, entradas, saídas e erros definidos."
+  - "Critérios verificáveis."
+  - "Dependências e bloqueios conhecidos."
+  - "ADRs obrigatórios resolvidos ou pendentes explícitos."
+  - "Ownership e branch definidos."
+
+definition_of_done:
+  - "Requisitos e critérios satisfeitos."
+  - "Código respeita specs e ADRs."
+  - "Testes atualizados e verificações aprovadas."
+  - "Documentação e benchmarks aplicáveis atualizados."
+  - "Limitações registradas."
+  - "Reviewer gate e convergence satisfeitos."
+  - "state.yml e checkpoint final válidos."
+  - "Checkpoint referencia commit verificado."
+  - "CI aprovada quando disponível."
+  - "Nenhum secret, dado pessoal ou evidência inventada."
+
+quality_gates:
+  - "QG-001: YAMLs operacionais passam nos schemas."
+  - "QG-002: Referências e IDs são válidos e únicos."
+  - "QG-003: Adaptadores não duplicam extensamente fontes canônicas."
+  - "QG-004: Resume e reconcile padrão são read-only."
+  - "QG-005: Checkpoint é atômico e registra próximo passo."
+  - "QG-006: State machine rejeita transições inválidas."
+  - "QG-007: Ownership concorrente é detectado."
+  - "QG-008: Todas as fixtures têm testes."
+  - "QG-009: CI executa comandos documentados."
+  - "QG-010: Produtos derivados proíbem LLM."
+  - "QG-011: Reutilização possui origem e licença."
+  - "QG-012: README ensina bootstrap, checkpoint e retomada."
+  - "QG-013: Commits e PRs seguem a convenção."
+  - "QG-014: Scripts não fazem operações destrutivas ou remotas implícitas."
+
+acceptance_criteria:
+  - "AC-001: Clone limpo instala com uv sync --locked."
+  - "AC-002: uv run pytest aprova toda a suíte."
+  - "AC-003: verify valida estrutura, schemas, referências e políticas."
+  - "AC-004: doctor diagnostica sem modificar arquivos."
+  - "AC-005: checkpoint persiste estado atomicamente."
+  - "AC-006: resume reconstrói contexto sem escrita."
+  - "AC-007: reconcile altera apenas com --apply."
+  - "AC-008: Novo agente retoma somente pelo repositório."
+  - "AC-009: Lite, Standard e Strict têm gates distintos."
+  - "AC-010: Spec Kit é núcleo sem duplicação de comandos."
+  - "AC-011: MADR, Conventional Commits, SemVer e Changelog são adotados."
+  - "AC-012: Writers concorrentes usam branch, worktree e ownership exclusivos."
+  - "AC-013: Reviewer tem modo, prioridades, findings e vereditos."
+  - "AC-014: PR title validado vira squash commit."
+  - "AC-015: Nenhum produto derivado depende de LLM."
+  - "AC-016: Migrações não sobrescrevem personalizações silenciosamente."
+
+implementation_sequence:
+  - "01: Inspecionar repositório, Git e instruções existentes."
+  - "02: Resolver e fixar versão estável do Spec Kit."
+  - "03: Criar spec e plano do próprio playbook."
+  - "04: Criar estrutura, pyproject e lockfile."
+  - "05: Implementar schemas e modelos operacionais."
+  - "06: Escrever ENGINEERING, AGENTS e política de agentes."
+  - "07: Criar adaptadores concisos."
+  - "08: Implementar perfis Lite, Standard e Strict."
+  - "09: Integrar MADR e notices."
+  - "10: Implementar verify e testes unitários."
+  - "11: Implementar doctor read-only."
+  - "12: Implementar checkpoint atômico."
+  - "13: Implementar resume read-only."
+  - "14: Implementar reconcile com --apply explícito."
+  - "15: Implementar bootstrap e migrate sem overwrite silencioso."
+  - "16: Implementar workstreams, handoff, reviewer e worktrees."
+  - "17: Criar perfis de stack verificáveis ou com placeholders."
+  - "18: Criar fixtures e testes comportamentais."
+  - "19: Criar pre-commit e CI de permissões mínimas."
+  - "20: Documentar recuperação, migração, segurança e limitações."
+  - "21: Executar format, lint, pyright, testes, verify e doctor."
+  - "22: Fazer revisão final somente leitura e corrigir findings reais."
+  - "23: Executar convergence contra briefing, spec, plan e tasks."
+  - "24: Criar checkpoint final sem commit, push ou release."
+
+safety:
+  - "Preservar alterações existentes não relacionadas."
+  - "Não apagar ou sobrescrever arquivo existente sem integrar conteúdo."
+  - "Não executar comandos destrutivos ou force push."
+  - "Não fazer commit, push, merge, tag ou release sem autorização."
+  - "Não armazenar transcrições, chain-of-thought, secrets ou PII."
+  - "Não afirmar compatibilidade, teste ou benchmark não executado."
+  - "Parar em conflito material que exija decisão do proprietário."
+
+completion_report:
+  sections:
+    - "outcome"
+    - "files changed"
+    - "resolved versions and sources"
+    - "commands actually executed"
+    - "quality gates"
+    - "review verdict and findings"
+    - "limitations and not-run checks"
+    - "current state and checkpoint"
+    - "exact next command"
+
+final_instruction: >-
+  Implemente integralmente este briefing no repositório atual. Trate-o como
+  contrato de requisitos. Comece inspecionando o estado real e criando a
+  especificação do próprio playbook. Seja autônomo apenas em decisões
+  reversíveis dentro do escopo. Pare diante de conflitos destrutivos,
+  permissões ausentes ou decisões materiais ambíguas. Não publique nem faça
+  operações remotas. Ao terminar, execute validações, revisão somente leitura,
+  convergence e checkpoint final, entregando evidências reais e o comando
+  exato para retomar o trabalho.

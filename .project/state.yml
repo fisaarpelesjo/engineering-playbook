@@ -1,0 +1,29 @@
+schema_version: 1.0.0
+updated_at: '2026-09-07T19:49:07Z'
+active_workstream: WS-001
+current_branch: main
+current_phase: converge
+status: converged
+active_specification: specs/001-engineering-playbook/spec.md
+active_plan: specs/001-engineering-playbook/plan.md
+active_tasks: specs/001-engineering-playbook/tasks.md
+active_task: T011
+last_checkpoint: .project/checkpoints/CP-20260907-001.yml
+last_verified_commit: unborn
+validation:
+  passed:
+  - uv sync --locked
+  - uv run ruff format --check .
+  - uv run ruff check .
+  - uv run pyright
+  - uv run pytest
+  - uv run python scripts/verify.py
+  - uv run python scripts/doctor.py
+  - uv run python scripts/resume.py
+  - uv run python scripts/reconcile.py
+  - uv run python scripts/checkpoint.py
+  failed: []
+  not_run: []
+blockers: []
+next_actions:
+- Retomar com uv run python scripts/resume.py antes de novas mudancas.

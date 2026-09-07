@@ -1,0 +1,2 @@
+stale checkpoint fixture placeholder
+

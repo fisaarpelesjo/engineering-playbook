@@ -1,0 +1,32 @@
+schema_version: "1.0.0"
+project:
+  name: "engineering-playbook"
+  language: "pt-BR"
+  default_workflow_profile: "standard"
+spec_kit:
+  source: "https://github.com/github/spec-kit"
+  version: "v1.0.4"
+  install: "uv tool install specify-cli --from git+https://github.com/github/spec-kit.git@v1.0.4"
+commands:
+  bootstrap: "uv run python scripts/bootstrap.py"
+  verify: "uv run python scripts/verify.py"
+  doctor: "uv run python scripts/doctor.py"
+  checkpoint: "uv run python scripts/checkpoint.py"
+  resume: "uv run python scripts/resume.py"
+  reconcile_inspect: "uv run python scripts/reconcile.py"
+  reconcile_apply: "uv run python scripts/reconcile.py --apply"
+  tests: "uv run pytest"
+sources:
+  - name: "GitHub Spec Kit"
+    url: "https://github.com/github/spec-kit"
+    version: "v1.0.4"
+  - name: "MADR"
+    url: "https://adr.github.io/madr/"
+supported_agents:
+  - "codex"
+  - "claude-code"
+  - "gemini-cli"
+  - "github-copilot"
+  - "cursor"
+  - "windsurf"
+

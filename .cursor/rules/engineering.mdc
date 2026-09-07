@@ -1,0 +1,7 @@
+---
+description: Engineering playbook governance
+alwaysApply: true
+---
+
+Use `AGENTS.md` and `ENGINEERING.md` as canonical instructions. Resume with `uv run python scripts/resume.py`, validate with `uv run python scripts/verify.py`, and checkpoint before stopping.
+

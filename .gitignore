@@ -1,0 +1,14 @@
+__pycache__/
+.pytest_cache/
+.ruff_cache/
+.venv/
+.pyright/
+.project/local/
+.project/checkpoints/*.tmp
+*.pyc
+*.pyo
+*.swp
+.env
+.env.*
+!.env.example
+
