@@ -1,15 +1,15 @@
 schema_version: 1.0.0
-updated_at: '2026-09-07T21:21:07Z'
+updated_at: '2026-09-07T21:44:32Z'
 active_workstream: WS-001
-current_branch: feat/020-cli-packaging
+current_branch: fix/021-derived-tests-dir
 current_phase: converge
 status: converged
 active_specification: specs/001-engineering-playbook/spec.md
 active_plan: specs/001-engineering-playbook/plan.md
 active_tasks: specs/001-engineering-playbook/tasks.md
 active_task: T017
-last_checkpoint: .project/checkpoints/CP-20260907-007.yml
-last_verified_commit: 24e3d92b4c8866732aa6b98bd630f414e4cb93b1
+last_checkpoint: .project/checkpoints/CP-20260907-008.yml
+last_verified_commit: 66b8760d722c901553352404a20ab934707c4b51
 validation:
   passed:
   - uv sync --locked

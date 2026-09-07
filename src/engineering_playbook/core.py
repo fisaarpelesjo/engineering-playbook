@@ -596,7 +596,8 @@ def verify_root(root: Path) -> CheckResult:
         for forbidden in [
             "bootstrap-engineering-template.yml",
             "specs/001-engineering-playbook",
-            "tests",
+            "tests/unit/test_core.py",
+            "tests/fixtures/requirements",
             ".project/distribution.yml",
         ]:
             result.add(
