@@ -5,6 +5,7 @@ import shutil
 from pathlib import Path
 
 from .core import (
+    GitUnavailableError,
     git_branch,
     git_head,
     git_status,
@@ -26,20 +27,30 @@ def command_doctor(root: Path) -> int:
     for command in ["python", "uv", "git"]:
         if shutil.which(command) is None:
             result.errors.append(f"Missing command: {command}")
-    print(f"branch: {git_branch(root)}")
-    print(f"head: {git_head(root)}")
-    print(f"dirty_paths: {len(git_status(root))}")
+    try:
+        branch, head, dirty_paths = git_branch(root), git_head(root), git_status(root)
+    except GitUnavailableError as failure:
+        result.errors.append(f"git nao respondeu, portanto o estado real nao foi medido: {failure}")
+        return print_result(result)
+    print(f"branch: {branch}")
+    print(f"head: {head}")
+    print(f"dirty_paths: {len(dirty_paths)}")
     return print_result(result)
 
 
 def command_resume(root: Path, output_format: str = "human") -> int:
     state = load_yaml(root / ".project/state.yml")
     result = verify_root(root)
+    try:
+        branch, head, dirty_paths = git_branch(root), git_head(root), git_status(root)
+    except GitUnavailableError as failure:
+        result.errors.append(f"git nao respondeu, portanto o estado real nao foi medido: {failure}")
+        branch, head, dirty_paths = "unknown", "unknown", []
     context = {
         "project": load_yaml(root / ".project/project.yml")["project"]["name"],
-        "branch": git_branch(root),
-        "head": git_head(root),
-        "dirty_paths": git_status(root),
+        "branch": branch,
+        "head": head,
+        "dirty_paths": dirty_paths,
         "active_workstream": state["active_workstream"],
         "status": state["status"],
         "active_specification": state["active_specification"],
@@ -73,8 +84,12 @@ def command_resume(root: Path, output_format: str = "human") -> int:
 def command_reconcile(root: Path, apply: bool = False) -> int:
     state_path = root / ".project/state.yml"
     state = load_yaml(state_path)
-    branch = git_branch(root)
-    head = git_head(root)
+    try:
+        branch = git_branch(root)
+        head = git_head(root)
+    except GitUnavailableError as failure:
+        print(f"ERROR: git nao respondeu, portanto nada foi reconciliado: {failure}")
+        return 1
     findings: list[str] = []
     if state.get("current_branch") != branch:
         findings.append(f"branch mismatch: state={state.get('current_branch')} git={branch}")
@@ -105,6 +120,11 @@ def command_checkpoint(root: Path) -> int:
         return 1
     state_path = root / ".project/state.yml"
     state = load_yaml(state_path)
+    try:
+        branch, head, dirty_paths = git_branch(root), git_head(root), git_status(root)
+    except GitUnavailableError as failure:
+        print(f"ERROR: git nao respondeu, checkpoint nao foi gravado: {failure}")
+        return 1
     checkpoint_id = next_checkpoint_id(root)
     checkpoint_rel = f".project/checkpoints/{checkpoint_id}.yml"
     passed = state.get("validation", {}).get("passed", [])
@@ -120,11 +140,11 @@ def command_checkpoint(root: Path) -> int:
         "created_at": utc_now(),
         "workstream": state["active_workstream"],
         "task": state["active_task"],
-        "branch": git_branch(root),
-        "head": git_head(root),
+        "branch": branch,
+        "head": head,
         "working_tree": {
-            "status": "dirty" if git_status(root) else "clean",
-            "modified_paths": git_status(root),
+            "status": "dirty" if dirty_paths else "clean",
+            "modified_paths": dirty_paths,
         },
         "completed_work": ["Implemented playbook artifacts or recorded current progress."],
         "commands": passed + failed,

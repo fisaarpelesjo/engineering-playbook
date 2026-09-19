@@ -19,3 +19,21 @@ uv run python scripts/delivery.py merge --auto --yes-remote
 ```
 
 Nao use push direto para `main`, force push, amend implicito ou merge sem passar pelos gates.
+
+## Guarda local: nenhum commit nasce na `main`
+
+Isto e um hook de git bruto (`scripts/git-hooks/pre-commit`), diferente do framework `pre-commit`
+configurado em `.pre-commit-config.yaml` (que roda ruff). Instale-o uma vez por clone:
+
+```bash
+git config core.hooksPath scripts/git-hooks
+chmod +x scripts/git-hooks/pre-commit
+```
+
+`chmod +x` e necessario a parte porque o instalador do playbook (`engineering-playbook init` /
+`update`) copia o conteudo do ficheiro mas nao define bit de execucao; sem ele, em Linux e
+macOS o git ignora o hook silenciosamente. O hook recusa um commit cujo `HEAD` seja `main` ou
+`master`; nao impede push direto (isso e `scripts/delivery.py publish` e o ruleset em
+`.github/rulesets/main.yml`) nem merge para `main`. `git commit --no-verify` e trocar
+`core.hooksPath` continuam a saltar por cima dele -- essas fraquezas estao documentadas no
+proprio ficheiro do hook.

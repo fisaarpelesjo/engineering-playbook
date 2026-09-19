@@ -255,37 +255,106 @@ def load_json(path: Path) -> Any:
 
 
 def validate_schema(root: Path, data_path: str, schema_path: str) -> list[str]:
+    """Validate ``data_path`` against ``schema_path``. Every error names the file AND the field.
+
+    ``error.message`` alone names the field for a missing-required-property violation ("'x' is
+    a required property"), but not for a type or enum violation on an existing nested field
+    ("12345 is not of type 'string'" says nothing about which field held 12345). ``error.path``
+    supplies that -- it is prepended whenever jsonschema populated it.
+    """
     data = load_yaml(root / data_path)
     schema = load_json(root / schema_path)
     validator = Draft202012Validator(schema)
-    return [
-        f"{data_path}: {error.message}" for error in sorted(validator.iter_errors(data), key=str)
-    ]
+    errors: list[str] = []
+    for error in sorted(validator.iter_errors(data), key=str):
+        field = ".".join(str(part) for part in error.path)
+        label = f"{data_path}.{field}" if field else data_path
+        errors.append(f"{label}: {error.message}")
+    return errors
+
+
+class GitUnavailableError(RuntimeError):
+    """git could not answer: it exited non-zero, or the executable itself could not run.
+
+    A check that cannot run is an error, never a pass. This does NOT cover a ref that simply
+    does not exist yet (empty repository, first commit without a parent) -- that is a
+    legitimate state, not a failure, and callers distinguish it with `git_ref_exists` before
+    ever raising this.
+    """
+
+
+def _run_git(root: Path, *args: str) -> subprocess.CompletedProcess[str]:
+    try:
+        return subprocess.run(
+            ["git", *args],
+            cwd=root,
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+    except OSError as failure:  # git off PATH, or not executable
+        raise GitUnavailableError(
+            f"git {' '.join(args)} nao pode ser executado: {failure}"
+        ) from None
 
 
 def git_capture(root: Path, *args: str) -> str:
-    completed = subprocess.run(
-        ["git", *args],
-        cwd=root,
-        text=True,
-        capture_output=True,
-        check=False,
-    )
+    """Run git and return stdout. Raises GitUnavailableError on any non-zero exit.
+
+    There used to be a silent `return ""` here on failure, and callers guarded with
+    `... or "fallback"` -- so a git that could not answer (not a repository, index.lock held,
+    git off PATH) read the same as a git that answered "nothing". A caller that may
+    legitimately be asking about a ref that does not exist yet (unborn HEAD, no parent commit)
+    must confirm that with `git_ref_exists` first, not infer it from an empty return value.
+    """
+    completed = _run_git(root, *args)
     if completed.returncode != 0:
-        return ""
+        raise GitUnavailableError(
+            f"git {' '.join(args)} saiu com {completed.returncode}: "
+            f"{completed.stderr.strip() or 'sem stderr'}"
+        )
     return completed.stdout.strip()
 
 
+def git_ref_exists(root: Path, ref: str) -> bool:
+    """True when `ref` resolves. False only for the legitimate "not yet" case.
+
+    `rev-parse --verify --quiet` exits 1, with no stderr, exactly when the ref is absent -- an
+    empty repository asked about HEAD, or a first commit asked about HEAD^. Any other non-zero
+    exit (not a repository, corrupt object database, a lock held by a concurrent process) is a
+    real failure and raises GitUnavailableError instead of being folded into False.
+    """
+    completed = _run_git(root, "rev-parse", "--verify", "--quiet", ref)
+    if completed.returncode == 0:
+        return True
+    if completed.returncode == 1:
+        return False
+    raise GitUnavailableError(
+        f"git rev-parse --verify --quiet {ref} saiu com {completed.returncode}: "
+        f"{completed.stderr.strip() or 'sem stderr'}"
+    )
+
+
 def git_branch(root: Path) -> str:
+    """The current branch name.
+
+    "unknown" now means exactly one thing: detached HEAD, where `--show-current` answers ""
+    with exit 0 -- a real, successful answer. A git that cannot answer at all raises
+    GitUnavailableError instead of reaching this fallback.
+    """
     return git_capture(root, "branch", "--show-current") or "unknown"
 
 
 def git_head(root: Path) -> str:
-    return git_capture(root, "rev-parse", "--verify", "HEAD") or "unborn"
+    if not git_ref_exists(root, "HEAD"):
+        return "unborn"
+    return git_capture(root, "rev-parse", "--verify", "HEAD")
 
 
 def git_parent(root: Path) -> str:
-    return git_capture(root, "rev-parse", "--verify", "HEAD^") or "unborn"
+    if not git_ref_exists(root, "HEAD^"):
+        return "unborn"
+    return git_capture(root, "rev-parse", "--verify", "HEAD^")
 
 
 def git_status(root: Path) -> list[str]:
@@ -537,16 +606,24 @@ def verify_root(root: Path) -> CheckResult:
     schema_pairs = [
         (".project/project.yml", ".project/schemas/project.schema.json"),
         (".project/state.yml", ".project/schemas/state.schema.json"),
-        (
-            ".project/workstreams/WS-001-engineering-playbook.yml",
-            ".project/schemas/workstream.schema.json",
-        ),
         ("templates/benchmark/benchmark.yml", ".project/schemas/benchmark.schema.json"),
         (".project/playbook.lock.yml", ".project/schemas/playbook-lock.schema.json"),
     ]
     for data_path, schema_path in schema_pairs:
         if (root / data_path).exists() and (root / schema_path).exists():
             result.errors.extend(validate_schema(root, data_path, schema_path))
+    workstream_schema = root / ".project/schemas/workstream.schema.json"
+    if workstream_schema.exists():
+        # Every workstream file, not just the one this repository happens to have today --
+        # a second workstream must be validated too, not silently skipped.
+        for workstream_file in sorted((root / ".project/workstreams").glob("WS-*.yml")):
+            result.errors.extend(
+                validate_schema(
+                    root,
+                    str(workstream_file.relative_to(root)),
+                    ".project/schemas/workstream.schema.json",
+                )
+            )
     for checkpoint in sorted((root / ".project" / "checkpoints").glob("CP-*.yml")):
         result.errors.extend(
             validate_schema(
@@ -584,11 +661,18 @@ def verify_root(root: Path) -> CheckResult:
                 f"Status {state.get('status')} requires a blocker/reason",
             )
         if state.get("status") in {"verified", "converged", "done"}:
-            result.add(
-                state.get("last_verified_commit") in {git_head(root), git_parent(root)},
-                "Verified/converged state requires last_verified_commit to match HEAD "
-                "or its parent commit",
-            )
+            try:
+                head, parent = git_head(root), git_parent(root)
+            except GitUnavailableError as failure:
+                result.errors.append(
+                    f"git nao respondeu, portanto last_verified_commit nao foi comparado: {failure}"
+                )
+            else:
+                result.add(
+                    state.get("last_verified_commit") in {head, parent},
+                    "Verified/converged state requires last_verified_commit to match HEAD "
+                    "or its parent commit",
+                )
 
     if not source_repository:
         lock_path = root / ".project/playbook.lock.yml"

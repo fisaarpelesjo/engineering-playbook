@@ -1,0 +1,102 @@
+#!/usr/bin/env bash
+#
+# pre-commit -- no commit is born on `main` (or `master`).
+#
+# =============================================================================
+# WHY THIS FILE EXISTS
+#
+# A committer can always type `git commit` while `HEAD` happens to be `main`,
+# by mistake or by habit, and by the time anything downstream notices, the
+# commit already exists in local history. Nothing else in this template
+# catches that moment:
+#
+#   - `scripts/delivery.py publish` refuses to push a branch named `main`
+#     (`branch_is_main` in `src/engineering_playbook/delivery.py`), but that
+#     is a push-time check and only fires if the delivery script is the one
+#     doing the pushing.
+#   - `scripts/delivery.py validate-ci --branch` (the `delivery-policy` CI
+#     job) checks branch *naming* for pull requests, and it explicitly lets
+#     `main`/`master` through — measured directly: `validate-ci --branch main`
+#     exits `0`. It runs on push/PR, after the commit already exists.
+#   - `.github/rulesets/main.yml` would block a direct push server-side, but
+#     the file says so itself: "Declarative proposal only. Do not apply
+#     remotely without explicit authorization." It is not applied.
+#
+# None of the three acts at commit time, locally, before a push or a PR
+# exists. This hook is that fourth point, not a second copy of the other
+# three: it does not re-implement branch naming, PR policy or push policy,
+# it adds the one moment none of them cover.
+#
+# It intentionally does not call into `scripts/delivery.py` to reuse
+# `MAIN_BRANCHES`/`branch_is_main`. This template targets every stack in
+# `profiles/stacks/` (C++, Go, Rust, .NET, ...), and a derived project is not
+# guaranteed to have Python or `uv` installed merely to take a commit. A git
+# hook that only works in Python projects would silently stop protecting
+# every other stack. The literal set below (`main`, `master`) is the same
+# value as `MAIN_BRANCHES` in `src/engineering_playbook/delivery.py`; if that
+# set ever changes, this line has to change with it by hand, and that
+# coupling is written here on purpose instead of being left implicit.
+# =============================================================================
+#
+# THE KNOWN WAYS PAST THIS GUARD, WRITTEN ON PURPOSE.
+#
+# A guard whose weakness is written down is a guard. A guard whose weakness
+# is left unsaid is theatre. So:
+#
+#   1. `git commit --no-verify` skips this file entirely. That is how git
+#      hooks work, this file cannot turn that off, and pretending otherwise
+#      would be the dishonesty this project does not deal in. If you commit
+#      with `--no-verify` while on `main`, this guard did not run.
+#   2. `git config core.hooksPath` can be pointed elsewhere or unset, and then
+#      nothing in this directory runs at all. This file cannot detect that it
+#      has been bypassed this way; only something that inspects
+#      `core.hooksPath` from outside the hook itself could, and no such check
+#      ships with this template today.
+#
+# What this guard does NOT do: it does not judge the branch name, does not
+# require it to reference a spec or an issue, and does not stop a merge INTO
+# `main`. It stops exactly one thing -- a commit whose `HEAD` is `main` (or
+# `master`) at the moment `git commit` runs.
+
+set -euo pipefail
+
+# `symbolic-ref`, not `rev-parse --abbrev-ref` -- measured, not assumed. In a
+# repository with zero commits (the unborn-branch state, which is exactly the
+# state of a repository's very first commit -- the one commit nobody can move
+# later without rewriting the root), `git rev-parse --abbrev-ref HEAD` exits
+# non-zero AND still writes the literal string "HEAD" to stdout. Piped through
+# the usual `... || echo ""` fallback, that literal "HEAD" is what a command
+# substitution captures (the fallback never runs, because it triggers on the
+# subshell's exit status, and stdout was already produced) -- so `$BRANCH`
+# becomes the string "HEAD", not "main" and not empty, and the `[ "$BRANCH" =
+# "main" ]` check below silently fails to fire on a repository's first commit.
+# `git symbolic-ref --short HEAD` reads the ref `HEAD` points at directly, with
+# or without any commit behind it, and returns "main" in that same state.
+BRANCH="$(git symbolic-ref --short HEAD 2>/dev/null || echo "")"
+
+if [ "$BRANCH" = "main" ] || [ "$BRANCH" = "master" ]; then
+    cat >&2 <<REFUSAL
+
+  REFUSED: this commit would be born on \`$BRANCH\`.
+
+  Nothing else in this template stops a commit at this exact moment: the
+  publish step only refuses to push \`$BRANCH\`, and CI's branch-name check
+  runs after the commit already exists and explicitly lets \`$BRANCH\` through.
+
+  What to do, without losing anything you already wrote:
+
+      git switch -c <type>/<slug>      # the working tree comes with you
+      git commit ...                   # and now it is born on the branch
+
+  If the branch already exists:
+
+      git switch <type>/<slug>
+
+  This guard does not stop merging into \`$BRANCH\` later. It stops the commit
+  being born there.
+
+REFUSAL
+    exit 1
+fi
+
+exit 0

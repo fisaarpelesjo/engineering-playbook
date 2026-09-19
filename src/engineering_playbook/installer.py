@@ -5,6 +5,7 @@ import hashlib
 import os
 import re
 import shutil
+import stat
 from dataclasses import dataclass
 from importlib import resources
 from pathlib import Path
@@ -149,6 +150,28 @@ def atomic_write_bytes(path: Path, data: bytes) -> None:
     tmp = path.with_name(f".{path.name}.tmp")
     tmp.write_bytes(data)
     os.replace(tmp, path)
+    mark_executable_if_script(path, data)
+
+
+def mark_executable_if_script(path: Path, data: bytes) -> None:
+    """Give a shipped script the bit its interpreter line promises.
+
+    A git hook installed without the execute bit is silently never run on
+    Linux and macOS, so a file whose first bytes are a shebang gets execute
+    wherever it already has read, filtered by the current umask. Windows
+    ignores the mode. A failure here never fails the install: the file is
+    already written, and a permission the caller has to fix is not a reason
+    to leave a half-applied plan behind.
+    """
+    if os.name == "nt" or not data.startswith(b"#!"):
+        return
+    try:
+        mode = stat.S_IMODE(path.stat().st_mode)
+        umask = os.umask(0)
+        os.umask(umask)
+        path.chmod((mode | ((mode & 0o444) >> 2)) & ~umask)
+    except OSError:
+        return
 
 
 def atomic_write_text(path: Path, text: str) -> None:
