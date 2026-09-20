@@ -1,5 +1,5 @@
 schema_version: 1.0.0
-updated_at: '2026-09-20T19:56:36Z'
+updated_at: '2026-09-20T20:01:18Z'
 active_workstream: WS-001
 current_branch: fix/006-reconcile-ruleset-and-activate-hooks
 issue: 25
@@ -9,8 +9,8 @@ active_specification: specs/001-engineering-playbook/spec.md
 active_plan: specs/001-engineering-playbook/plan.md
 active_tasks: specs/001-engineering-playbook/tasks.md
 active_task: T017
-last_checkpoint: .project/checkpoints/CP-20260920-030.yml
-last_verified_commit: db962db556f797313c7119fca0036249da386a20
+last_checkpoint: .project/checkpoints/CP-20260920-031.yml
+last_verified_commit: c6d0253b45df3118d6af034f58169dd229021b87
 validation:
   passed:
   - uv sync --locked
