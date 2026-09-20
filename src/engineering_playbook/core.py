@@ -988,8 +988,15 @@ def verify_root(root: Path) -> CheckResult:
     #      because it inspects configuration, not individual invocations.
     #   3. This check runs locally, on the machine that happens to run `doctor`/`verify`;
     #      per FR-012 it has no effect on a clone where nobody ever runs those commands.
+    #   4. A continuous integration runner checks out the repository and never configures
+    #      client hooks, because it has no commits of its own to guard. Measured on run
+    #      35532861087, where this check turned every job red for a condition that is
+    #      meaningless there. It is therefore skipped when the environment declares itself
+    #      to be CI, and the cost of that skip is stated plainly: a CI run cannot testify
+    #      about the hooks on the workstation that produced the commit.
     hooks_dir = root / "scripts" / "git-hooks"
-    if (root / ".git").exists() and hooks_dir.is_dir():
+    running_in_ci = bool(os.environ.get("CI") or os.environ.get("GITHUB_ACTIONS"))
+    if (root / ".git").exists() and hooks_dir.is_dir() and not running_in_ci:
         expected_hooks_path = "scripts/git-hooks"
         normalized = ""
         try:

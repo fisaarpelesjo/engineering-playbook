@@ -12,6 +12,8 @@ from __future__ import annotations
 import subprocess
 from pathlib import Path
 
+import pytest
+
 from engineering_playbook.core import verify_root
 
 
@@ -27,8 +29,15 @@ def install_hooks_dir(root: Path) -> None:
     (hooks_dir / "pre-commit").write_text("#!/usr/bin/env bash\nexit 0\n", encoding="utf-8")
 
 
-def test_verify_rejects_both_mechanisms_active_at_once(tmp_path: Path) -> None:
+def test_verify_rejects_both_mechanisms_active_at_once(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """The adversarial attempt: reintroduce .pre-commit-config.yaml with hooksPath active."""
+    # The hooks block this check lives in is skipped under CI, where client hooks
+    # are meaningless. This test is about the guard firing, so it states the
+    # environment it needs instead of inheriting the runner's.
+    monkeypatch.delenv("CI", raising=False)
+    monkeypatch.delenv("GITHUB_ACTIONS", raising=False)
     init_repo(tmp_path)
     install_hooks_dir(tmp_path)
     subprocess.run(

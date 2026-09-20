@@ -63,8 +63,15 @@ def test_git_config_get_raises_on_a_real_error_not_none(tmp_path: Path) -> None:
 # --- verify_root: the adversarial attempt, and the rejection it must produce (AC-002) -------
 
 
-def test_doctor_verify_rejects_an_unconfigured_hooks_path(tmp_path: Path) -> None:
+def test_doctor_verify_rejects_an_unconfigured_hooks_path(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """The exact attempt AC-002 names: hooks shipped, core.hooksPath never configured."""
+    # The guard is skipped under CI, where client hooks are meaningless; these
+    # tests are about the guard firing, so they state the environment they need
+    # instead of inheriting whatever the runner happens to export.
+    monkeypatch.delenv("CI", raising=False)
+    monkeypatch.delenv("GITHUB_ACTIONS", raising=False)
     init_repo(tmp_path)
     install_hooks_dir(tmp_path)
 
@@ -75,8 +82,15 @@ def test_doctor_verify_rejects_an_unconfigured_hooks_path(tmp_path: Path) -> Non
     )
 
 
-def test_doctor_verify_rejects_a_hooks_path_pointed_elsewhere(tmp_path: Path) -> None:
+def test_doctor_verify_rejects_a_hooks_path_pointed_elsewhere(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """Configured, but not at this template's hooks -- still not active for FR-003's purpose."""
+    # The guard is skipped under CI, where client hooks are meaningless; these
+    # tests are about the guard firing, so they state the environment they need
+    # instead of inheriting whatever the runner happens to export.
+    monkeypatch.delenv("CI", raising=False)
+    monkeypatch.delenv("GITHUB_ACTIONS", raising=False)
     init_repo(tmp_path)
     install_hooks_dir(tmp_path)
     subprocess.run(
@@ -88,8 +102,15 @@ def test_doctor_verify_rejects_a_hooks_path_pointed_elsewhere(tmp_path: Path) ->
     assert any("Client git hooks are not active" in error for error in result.errors)
 
 
-def test_doctor_verify_accepts_a_correctly_configured_hooks_path(tmp_path: Path) -> None:
+def test_doctor_verify_accepts_a_correctly_configured_hooks_path(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """The other half: a correct configuration must not be flagged (not a one-sided guard)."""
+    # The guard is skipped under CI, where client hooks are meaningless; these
+    # tests are about the guard firing, so they state the environment they need
+    # instead of inheriting whatever the runner happens to export.
+    monkeypatch.delenv("CI", raising=False)
+    monkeypatch.delenv("GITHUB_ACTIONS", raising=False)
     init_repo(tmp_path)
     install_hooks_dir(tmp_path)
     subprocess.run(
@@ -158,3 +179,25 @@ def test_engineering_playbook_init_activates_the_hooks_it_installs(tmp_path: Pat
     assert command_init(args) == 0
     assert (tmp_path / "scripts" / "git-hooks" / "pre-commit").is_file()
     assert git_config_get(tmp_path, "core.hooksPath") == "scripts/git-hooks"
+
+
+def test_the_hooks_check_is_skipped_under_continuous_integration(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Measured on run 35532861087, not hypothesised.
+
+    A runner checks out the repository and never configures client hooks, because
+    it has no commits of its own to guard. With the check active there, every job
+    went red for a condition that is meaningless in that environment. The cost of
+    the skip is stated in the guard: a CI run cannot testify about the hooks on
+    the workstation that produced the commit.
+    """
+    init_repo(tmp_path)
+    install_hooks_dir(tmp_path)
+    monkeypatch.setenv("CI", "true")
+
+    result = verify_root(tmp_path)
+
+    assert not any("core.hooksPath" in error for error in result.errors), (
+        f"the hooks check fired under CI: {result.errors}"
+    )
