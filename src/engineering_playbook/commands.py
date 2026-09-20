@@ -5,6 +5,7 @@ import shutil
 from pathlib import Path
 
 from .core import (
+    GitUnavailableError,
     git_branch,
     git_head,
     git_status,
@@ -15,6 +16,7 @@ from .core import (
     verify_root,
     write_yaml_atomic,
 )
+from .receipt import CiReceiptStatus, battery_claims, check_ci_receipt
 
 
 def command_verify(root: Path) -> int:
@@ -26,20 +28,30 @@ def command_doctor(root: Path) -> int:
     for command in ["python", "uv", "git"]:
         if shutil.which(command) is None:
             result.errors.append(f"Missing command: {command}")
-    print(f"branch: {git_branch(root)}")
-    print(f"head: {git_head(root)}")
-    print(f"dirty_paths: {len(git_status(root))}")
+    try:
+        branch, head, dirty_paths = git_branch(root), git_head(root), git_status(root)
+    except GitUnavailableError as failure:
+        result.errors.append(f"git nao respondeu, portanto o estado real nao foi medido: {failure}")
+        return print_result(result)
+    print(f"branch: {branch}")
+    print(f"head: {head}")
+    print(f"dirty_paths: {len(dirty_paths)}")
     return print_result(result)
 
 
 def command_resume(root: Path, output_format: str = "human") -> int:
     state = load_yaml(root / ".project/state.yml")
     result = verify_root(root)
+    try:
+        branch, head, dirty_paths = git_branch(root), git_head(root), git_status(root)
+    except GitUnavailableError as failure:
+        result.errors.append(f"git nao respondeu, portanto o estado real nao foi medido: {failure}")
+        branch, head, dirty_paths = "unknown", "unknown", []
     context = {
         "project": load_yaml(root / ".project/project.yml")["project"]["name"],
-        "branch": git_branch(root),
-        "head": git_head(root),
-        "dirty_paths": git_status(root),
+        "branch": branch,
+        "head": head,
+        "dirty_paths": dirty_paths,
         "active_workstream": state["active_workstream"],
         "status": state["status"],
         "active_specification": state["active_specification"],
@@ -73,8 +85,12 @@ def command_resume(root: Path, output_format: str = "human") -> int:
 def command_reconcile(root: Path, apply: bool = False) -> int:
     state_path = root / ".project/state.yml"
     state = load_yaml(state_path)
-    branch = git_branch(root)
-    head = git_head(root)
+    try:
+        branch = git_branch(root)
+        head = git_head(root)
+    except GitUnavailableError as failure:
+        print(f"ERROR: git nao respondeu, portanto nada foi reconciliado: {failure}")
+        return 1
     findings: list[str] = []
     if state.get("current_branch") != branch:
         findings.append(f"branch mismatch: state={state.get('current_branch')} git={branch}")
@@ -97,7 +113,7 @@ def command_reconcile(root: Path, apply: bool = False) -> int:
     return 0
 
 
-def command_checkpoint(root: Path) -> int:
+def command_checkpoint(root: Path, *, allow_divergent: bool = False) -> int:
     result = verify_root(root)
     if result.errors:
         for error in result.errors:
@@ -105,6 +121,32 @@ def command_checkpoint(root: Path) -> int:
         return 1
     state_path = root / ".project/state.yml"
     state = load_yaml(state_path)
+    try:
+        branch, head, dirty_paths = git_branch(root), git_head(root), git_status(root)
+    except GitUnavailableError as failure:
+        print(f"ERROR: git nao respondeu, checkpoint nao foi gravado: {failure}")
+        return 1
+
+    # A checkpoint that AFFIRMS a green battery (validation.passed claims one ran) must not be
+    # written unless the CI receipt covers this exact HEAD. Absence of a receipt, a receipt for
+    # another commit, a dirty tree, or a partial/red run are all refused, never read as green.
+    # allow_divergent is the explicit escape hatch: it writes the checkpoint anyway, but marks
+    # it battery_claim_divergent and the command still exits 1 -- a divergent stop must not look
+    # like a clean one.
+    battery_claim_divergent = False
+    if battery_claims(state):
+        receipt_check = check_ci_receipt(root, head)
+        if receipt_check.status is not CiReceiptStatus.COVERS:
+            if not allow_divergent:
+                print(f"checkpoint NAO gravado: {receipt_check.reason}")
+                print(
+                    "Rode a bateria de novo contra este HEAD, ou passe "
+                    "allow_divergent=True para registrar a parada divergente mesmo assim."
+                )
+                return 1
+            print(f"AVISO, e registrado: {receipt_check.reason}")
+            battery_claim_divergent = True
+
     checkpoint_id = next_checkpoint_id(root)
     checkpoint_rel = f".project/checkpoints/{checkpoint_id}.yml"
     passed = state.get("validation", {}).get("passed", [])
@@ -120,17 +162,18 @@ def command_checkpoint(root: Path) -> int:
         "created_at": utc_now(),
         "workstream": state["active_workstream"],
         "task": state["active_task"],
-        "branch": git_branch(root),
-        "head": git_head(root),
+        "branch": branch,
+        "head": head,
         "working_tree": {
-            "status": "dirty" if git_status(root) else "clean",
-            "modified_paths": git_status(root),
+            "status": "dirty" if dirty_paths else "clean",
+            "modified_paths": dirty_paths,
         },
         "completed_work": ["Implemented playbook artifacts or recorded current progress."],
         "commands": passed + failed,
         "validation": validation,
         "blockers": state.get("blockers", []),
         "next_action": state.get("next_actions", ["Run resume."])[0],
+        "battery_claim_divergent": battery_claim_divergent,
     }
     write_yaml_atomic(root / checkpoint_rel, checkpoint)
     state["last_checkpoint"] = checkpoint_rel
@@ -139,6 +182,13 @@ def command_checkpoint(root: Path) -> int:
     state["validation"] = validation
     write_yaml_atomic(state_path, state)
     print(checkpoint_rel)
+    if battery_claim_divergent:
+        print(
+            f"{checkpoint_rel} registra uma PARADA DIVERGENTE: a alegacao de bateria em "
+            "validation.passed nao foi conferida contra este HEAD. battery_claim_divergent: "
+            "true."
+        )
+        return 1
     return 0
 
 

@@ -12,7 +12,7 @@
     "active_specification": {"type": ["string", "null"]},
     "active_plan": {"type": ["string", "null"]},
     "active_tasks": {"type": ["string", "null"]},
-    "active_task": {"type": ["string", "null"], "pattern": "^T[0-9]{3}$"},
+    "active_task": {"type": ["string", "null"], "pattern": "^T[0-9]{3,5}$"},
     "last_checkpoint": {"type": ["string", "null"]},
     "last_verified_commit": {"type": ["string", "null"]},
     "validation": {
@@ -25,6 +25,11 @@
       }
     },
     "blockers": {"type": "array", "items": {"type": "string"}},
-    "next_actions": {"type": "array", "items": {"type": "string"}, "minItems": 1}
+    "next_actions": {"type": "array", "items": {"type": "string"}, "minItems": 1},
+    "unit_status": {"type": "string", "enum": ["WORKING", "READY_FOR_REVIEW", "CHANGES_REQUESTED", "PASS", "OWNER_DECISION_REQUIRED", "STOPPED"]},
+    "updated_at_local": {"type": "string"},
+    "timezone": {"type": "string"},
+    "authorized_scope": {"type": ["string", "null"]},
+    "owner_authorization_required": {"type": "boolean"}
   }
 }

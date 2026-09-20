@@ -1,0 +1,19 @@
+# Escrito por scripts/local_ci.py. NAO editar a mao.
+# Diz contra QUE COMMIT esta corrida rodou -- um verde aqui nao vale para outro HEAD.
+schema_version: 1
+kind: local_ci_receipt
+ran_at: '2026-09-20T01:59:52Z'
+head: 'cef4af990037fdceb6a32d41d17a5bfa8eef5955'
+head_before_run: 'cef4af990037fdceb6a32d41d17a5bfa8eef5955'
+tree_was_dirty_before_run: true
+tree_changed_during_run: false
+tree_was_dirty: true
+dirty_paths: 34
+red: 1
+partial: 0
+green: 0
+affected_mode: false
+dry_run: false
+workflows_available: 1
+workflows_requested: 1
+workflows_run: 1

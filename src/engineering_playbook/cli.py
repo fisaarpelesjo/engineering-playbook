@@ -15,6 +15,7 @@ from .commands import (
 )
 from .delivery import main as delivery_main
 from .installer import command_init, command_update
+from .local_ci import main as local_ci_main
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -50,10 +51,20 @@ def build_parser() -> argparse.ArgumentParser:
     resume.add_argument("--format", choices=["human", "markdown", "json"], default="human")
     reconcile = add_root(subparsers.add_parser("reconcile"))
     reconcile.add_argument("--apply", action="store_true")
-    add_root(subparsers.add_parser("checkpoint"))
+    checkpoint = add_root(subparsers.add_parser("checkpoint"))
+    checkpoint.add_argument(
+        "--allow-divergent",
+        action="store_true",
+        help="record a stop whose battery does not cover HEAD, marked as divergent",
+    )
     add_root(subparsers.add_parser("migrate"))
 
     subparsers.add_parser("delivery", help="Run the safe Git delivery pipeline.")
+    subparsers.add_parser(
+        "local-ci",
+        help="Run the CI steps derived from .github/workflows, and write the receipt.",
+        add_help=False,
+    )
     subparsers.add_parser("version")
     return parser
 
@@ -65,6 +76,11 @@ def main(argv: list[str] | None = None) -> int:
         if "--root" not in delivery_args:
             delivery_args = ["--root", str(Path.cwd()), *delivery_args]
         return delivery_main(delivery_args)
+
+    if raw_argv and raw_argv[0] == "local-ci":
+        # local-ci parses its own flags (--list, --affected, --base), so the
+        # rest of the line reaches it untouched, the way delivery does.
+        return local_ci_main(raw_argv[1:])
 
     parser = build_parser()
     args = parser.parse_args(argv)
@@ -83,7 +99,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "reconcile":
         return command_reconcile(root, args.apply)
     if args.command == "checkpoint":
-        return command_checkpoint(root)
+        return command_checkpoint(root, allow_divergent=args.allow_divergent)
     if args.command == "migrate":
         return command_migrate(root)
     if args.command == "version":

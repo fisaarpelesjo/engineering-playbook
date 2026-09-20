@@ -8,7 +8,7 @@ import subprocess
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import yaml
 from jsonschema import Draft202012Validator
@@ -186,7 +186,7 @@ REQUIRED_STACKS = [
     "sql",
 ]
 
-VALID_TRANSITIONS = {
+VALID_TRANSITIONS: dict[str, set[str]] = {
     "proposed": {"clarified", "planned", "abandoned", "blocked"},
     "clarified": {"planned", "blocked", "abandoned"},
     "planned": {"ready", "in_progress", "blocked", "abandoned"},
@@ -255,37 +255,127 @@ def load_json(path: Path) -> Any:
 
 
 def validate_schema(root: Path, data_path: str, schema_path: str) -> list[str]:
+    """Validate ``data_path`` against ``schema_path``. Every error names the file AND the field.
+
+    ``error.message`` alone names the field for a missing-required-property violation ("'x' is
+    a required property"), but not for a type or enum violation on an existing nested field
+    ("12345 is not of type 'string'" says nothing about which field held 12345). ``error.path``
+    supplies that -- it is prepended whenever jsonschema populated it.
+    """
     data = load_yaml(root / data_path)
     schema = load_json(root / schema_path)
     validator = Draft202012Validator(schema)
-    return [
-        f"{data_path}: {error.message}" for error in sorted(validator.iter_errors(data), key=str)
-    ]
+    errors: list[str] = []
+    # jsonschema's bundled stub (validators.pyi) leaves `instance` untyped on both
+    # `iter_errors` overloads, so the member itself is reported partially unknown
+    # regardless of how `data` is typed here -- a third-party stub limitation.
+    for error in sorted(
+        validator.iter_errors(data),  # pyright: ignore[reportUnknownMemberType]
+        key=str,
+    ):
+        field = ".".join(str(part) for part in error.path)
+        label = f"{data_path}.{field}" if field else data_path
+        errors.append(f"{label}: {error.message}")
+    return errors
+
+
+class GitUnavailableError(RuntimeError):
+    """git could not answer: it exited non-zero, or the executable itself could not run.
+
+    A check that cannot run is an error, never a pass. This does NOT cover a ref that simply
+    does not exist yet (empty repository, first commit without a parent) -- that is a
+    legitimate state, not a failure, and callers distinguish it with `git_ref_exists` before
+    ever raising this.
+    """
+
+
+def _run_git(root: Path, *args: str) -> subprocess.CompletedProcess[str]:
+    try:
+        return subprocess.run(
+            ["git", *args],
+            cwd=root,
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+    except OSError as failure:  # git off PATH, or not executable
+        raise GitUnavailableError(
+            f"git {' '.join(args)} nao pode ser executado: {failure}"
+        ) from None
 
 
 def git_capture(root: Path, *args: str) -> str:
-    completed = subprocess.run(
-        ["git", *args],
-        cwd=root,
-        text=True,
-        capture_output=True,
-        check=False,
-    )
+    """Run git and return stdout. Raises GitUnavailableError on any non-zero exit.
+
+    There used to be a silent `return ""` here on failure, and callers guarded with
+    `... or "fallback"` -- so a git that could not answer (not a repository, index.lock held,
+    git off PATH) read the same as a git that answered "nothing". A caller that may
+    legitimately be asking about a ref that does not exist yet (unborn HEAD, no parent commit)
+    must confirm that with `git_ref_exists` first, not infer it from an empty return value.
+    """
+    completed = _run_git(root, *args)
     if completed.returncode != 0:
-        return ""
+        raise GitUnavailableError(
+            f"git {' '.join(args)} saiu com {completed.returncode}: "
+            f"{completed.stderr.strip() or 'sem stderr'}"
+        )
     return completed.stdout.strip()
 
 
+def git_ref_exists(root: Path, ref: str) -> bool:
+    """True when `ref` resolves. False only for the legitimate "not yet" case.
+
+    `rev-parse --verify --quiet` exits 1, with no stderr, exactly when the ref is absent -- an
+    empty repository asked about HEAD, or a first commit asked about HEAD^. Any other non-zero
+    exit (not a repository, corrupt object database, a lock held by a concurrent process) is a
+    real failure and raises GitUnavailableError instead of being folded into False.
+    """
+    completed = _run_git(root, "rev-parse", "--verify", "--quiet", ref)
+    if completed.returncode == 0:
+        return True
+    if completed.returncode == 1:
+        return False
+    raise GitUnavailableError(
+        f"git rev-parse --verify --quiet {ref} saiu com {completed.returncode}: "
+        f"{completed.stderr.strip() or 'sem stderr'}"
+    )
+
+
 def git_branch(root: Path) -> str:
+    """The current branch name.
+
+    "unknown" now means exactly one thing: detached HEAD, where `--show-current` answers ""
+    with exit 0 -- a real, successful answer. A git that cannot answer at all raises
+    GitUnavailableError instead of reaching this fallback.
+    """
     return git_capture(root, "branch", "--show-current") or "unknown"
 
 
 def git_head(root: Path) -> str:
-    return git_capture(root, "rev-parse", "--verify", "HEAD") or "unborn"
+    if not git_ref_exists(root, "HEAD"):
+        return "unborn"
+    return git_capture(root, "rev-parse", "--verify", "HEAD")
 
 
 def git_parent(root: Path) -> str:
-    return git_capture(root, "rev-parse", "--verify", "HEAD^") or "unborn"
+    if not git_ref_exists(root, "HEAD^"):
+        return "unborn"
+    return git_capture(root, "rev-parse", "--verify", "HEAD^")
+
+
+def git_parents(root: Path) -> list[str]:
+    """Every parent of HEAD, not only the first.
+
+    A pull request is built on a merge commit whose FIRST parent is the base
+    branch and whose second is the branch under review. Reading only `HEAD^`
+    there answers about main, so a state verified on the branch reads as
+    unverified and the gate goes red for a reason that has nothing to do with
+    the work. An unborn HEAD has no parents, which is an answer, not an error.
+    """
+    if not git_ref_exists(root, "HEAD"):
+        return []
+    line = git_capture(root, "rev-list", "--parents", "-n", "1", "HEAD")
+    return line.split()[1:]
 
 
 def git_status(root: Path) -> list[str]:
@@ -305,7 +395,7 @@ def next_checkpoint_id(root: Path) -> str:
 
 
 def validate_transition(old: str, new: str) -> bool:
-    return new in VALID_TRANSITIONS.get(old, set())
+    return new in VALID_TRANSITIONS.get(old, set[str]())
 
 
 def find_ids(text: str, prefix: str) -> list[str]:
@@ -328,7 +418,7 @@ def extract_front_matter(text: str) -> tuple[dict[str, Any], str]:
     end = text.find("\n---\n", 4)
     if end == -1:
         return {}, text
-    metadata = yaml.safe_load(text[4:end]) or {}
+    metadata: dict[str, Any] = yaml.safe_load(text[4:end]) or {}
     return metadata, text[end + 5 :]
 
 
@@ -350,7 +440,9 @@ def extract_requirement_blocks(text: str) -> list[dict[str, Any]]:
             continue
         loaded = yaml.safe_load(block_text)
         if isinstance(loaded, dict) and "id" in loaded and "type" in loaded:
-            blocks.append(loaded)
+            # Boundary conversion: a YAML block confirmed to be a mapping with the
+            # two keys every requirement block must carry.
+            blocks.append(cast(dict[str, Any], loaded))
     return blocks
 
 
@@ -464,10 +556,11 @@ def validate_prd_document(path: Path, *, template: bool = False) -> list[str]:
         if not criteria:
             errors.append(f"{path}: requirement {requirement_id} has no acceptance criteria")
         elif isinstance(criteria, list):
-            for criterion in criteria:
-                if not isinstance(criterion, dict):
+            for raw_criterion in cast(list[Any], criteria):
+                if not isinstance(raw_criterion, dict):
                     errors.append(f"{path}: requirement {requirement_id} has invalid criterion")
                     continue
+                criterion = cast(dict[str, Any], raw_criterion)
                 criterion_id = str(criterion.get("id", ""))
                 if not re.match(r"^AC-[0-9]{3}$", criterion_id):
                     errors.append(
@@ -537,16 +630,24 @@ def verify_root(root: Path) -> CheckResult:
     schema_pairs = [
         (".project/project.yml", ".project/schemas/project.schema.json"),
         (".project/state.yml", ".project/schemas/state.schema.json"),
-        (
-            ".project/workstreams/WS-001-engineering-playbook.yml",
-            ".project/schemas/workstream.schema.json",
-        ),
         ("templates/benchmark/benchmark.yml", ".project/schemas/benchmark.schema.json"),
         (".project/playbook.lock.yml", ".project/schemas/playbook-lock.schema.json"),
     ]
     for data_path, schema_path in schema_pairs:
         if (root / data_path).exists() and (root / schema_path).exists():
             result.errors.extend(validate_schema(root, data_path, schema_path))
+    workstream_schema = root / ".project/schemas/workstream.schema.json"
+    if workstream_schema.exists():
+        # Every workstream file, not just the one this repository happens to have today --
+        # a second workstream must be validated too, not silently skipped.
+        for workstream_file in sorted((root / ".project/workstreams").glob("WS-*.yml")):
+            result.errors.extend(
+                validate_schema(
+                    root,
+                    str(workstream_file.relative_to(root)),
+                    ".project/schemas/workstream.schema.json",
+                )
+            )
     for checkpoint in sorted((root / ".project" / "checkpoints").glob("CP-*.yml")):
         result.errors.extend(
             validate_schema(
@@ -584,11 +685,18 @@ def verify_root(root: Path) -> CheckResult:
                 f"Status {state.get('status')} requires a blocker/reason",
             )
         if state.get("status") in {"verified", "converged", "done"}:
-            result.add(
-                state.get("last_verified_commit") in {git_head(root), git_parent(root)},
-                "Verified/converged state requires last_verified_commit to match HEAD "
-                "or its parent commit",
-            )
+            try:
+                accepted = {git_head(root), *git_parents(root)}
+            except GitUnavailableError as failure:
+                result.errors.append(
+                    f"git nao respondeu, portanto last_verified_commit nao foi comparado: {failure}"
+                )
+            else:
+                result.add(
+                    state.get("last_verified_commit") in accepted,
+                    "Verified/converged state requires last_verified_commit to match HEAD "
+                    "or one of its parent commits",
+                )
 
     if not source_repository:
         lock_path = root / ".project/playbook.lock.yml"
@@ -615,10 +723,10 @@ def verify_root(root: Path) -> CheckResult:
                     f"Derived state leaks source reference: {forbidden_text}",
                 )
 
-    project = (
+    project: dict[str, Any] = (
         load_yaml(root / ".project/project.yml") if (root / ".project/project.yml").exists() else {}
     )
-    spec_kit = project.get("spec_kit", {})
+    spec_kit: dict[str, Any] = project.get("spec_kit", {})
     result.add(spec_kit.get("version") == "v1.0.4", "Spec Kit version must be pinned to v1.0.4")
 
     pyproject_path = root / "pyproject.toml"
@@ -716,12 +824,13 @@ def verify_root(root: Path) -> CheckResult:
             "reconcile.py must require --apply for writes",
         )
 
-    workstreams = []
+    workstreams: list[dict[str, Any]] = []
     for path in (root / ".project/workstreams").glob("*.yml"):
         workstreams.append(load_yaml(path))
     owners: dict[str, str] = {}
     for ws in workstreams:
-        for owned in ws.get("owned_paths", []):
+        # workstream.schema.json fixes owned_paths as an array of strings.
+        for owned in cast(list[str], ws.get("owned_paths", [])):
             if owned == ".":
                 continue
             result.add(owned not in owners, f"Overlapping workstream ownership: {owned}")

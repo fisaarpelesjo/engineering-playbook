@@ -37,13 +37,18 @@ line-length = 100
 target-version = "py311"
 
 [tool.ruff.lint]
-select = ["E", "F", "I", "UP", "B", "SIM"]
+# W, N, A, C4 and RUF come from a project that ran this playbook for months.
+# Adopting them here cost one finding, measured before the change.
+select = ["E", "F", "W", "I", "N", "UP", "B", "A", "C4", "SIM", "RUF"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = [".", "src"]
+# An undeclared marker and a malformed config are silent losses of coverage,
+# so each fails the run instead of passing with a warning nobody reads.
+addopts = "-ra --strict-markers --strict-config"
 
 [tool.pyright]
 pythonVersion = "3.11"
 include = ["src", "scripts", "tests"]
-typeCheckingMode = "basic"
+typeCheckingMode = "strict"

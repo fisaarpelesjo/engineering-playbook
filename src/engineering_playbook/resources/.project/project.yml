@@ -23,6 +23,17 @@ sources:
     version: "v1.0.4"
   - name: "MADR"
     url: "https://adr.github.io/madr/"
+canonical_documents:
+  entrypoint: "AGENTS.md"
+  engineering: "ENGINEERING.md"
+  loop: "docs/agents/LOOP.md"
+  agent_policy: "docs/agents/AGENT_POLICY.md"
+  owner_orders: "docs/agents/OWNER_STANDING_ORDERS.md"
+  review: "REVIEW.md"
+  reporting_contract: "docs/agents/REPORTING_CONTRACT.md"
+  handoff: "docs/agents/HANDOFF_PROTOCOL.md"
+  recovery: "docs/agents/RECOVERY_PROTOCOL.md"
+subagents_directory: ".claude/agents"
 supported_agents:
   - "codex"
   - "claude-code"

@@ -233,8 +233,14 @@ def test_delivery_detects_failing_ci() -> None:
 
 
 def test_delivery_detects_obsolete_prepare(tmp_path: Path) -> None:
+    # `prepare_is_fresh` compares prepare.yml against real git answers. It used to pass here
+    # only because a bootstrapped target that is not a git repository made `git_head`/
+    # `git_branch` fail silently and return "unborn"/"unknown" -- indistinguishable from a
+    # git that had genuinely nothing to say. That failure is now GitUnavailableError, so the target
+    # must be an actual (if commit-less) git repository for this comparison to mean anything.
     target = tmp_path / "repo"
     assert run_script("scripts/bootstrap.py", "--target", str(target)).returncode == 0
+    subprocess.run(["git", "init", "-q", "-b", "main"], cwd=target, check=True)
     prepare_dir = target / ".project/delivery"
     prepare_dir.mkdir(parents=True)
     (prepare_dir / "prepare.yml").write_text(

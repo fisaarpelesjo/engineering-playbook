@@ -1,0 +1,72 @@
+schema_version: 1.0.0
+checkpoint_id: CP-20260919-001
+created_at: '2026-09-19T22:34:51Z'
+workstream: WS-001
+task: T017
+branch: feat/002-hardening-from-derived
+head: 3716a24a0b834dc17eae4dfa0f86db7c882b6878
+working_tree:
+  status: dirty
+  modified_paths:
+  - M  .project/schemas/checkpoint.schema.json
+  - M  .project/schemas/state.schema.json
+  - M  CONTRIBUTING.md
+  - M  ENGINEERING.md
+  - M  docs/agents/RECOVERY_PROTOCOL.md
+  - A  docs/agents/REPORTING_CONTRACT.md
+  - M  pyproject.toml
+  - A  scripts/git-hooks/pre-commit
+  - M  src/engineering_playbook/commands.py
+  - M  src/engineering_playbook/core.py
+  - M  src/engineering_playbook/delivery.py
+  - M  src/engineering_playbook/installer.py
+  - M  src/engineering_playbook/resources/.project/schemas/checkpoint.schema.json
+  - M  src/engineering_playbook/resources/.project/schemas/state.schema.json
+  - M  src/engineering_playbook/resources/CONTRIBUTING.md
+  - M  src/engineering_playbook/resources/ENGINEERING.md
+  - M  src/engineering_playbook/resources/docs/agents/RECOVERY_PROTOCOL.md
+  - A  src/engineering_playbook/resources/docs/agents/REPORTING_CONTRACT.md
+  - M  src/engineering_playbook/resources/pyproject.toml
+  - A  src/engineering_playbook/resources/scripts/git-hooks/pre-commit
+  - M  tests/unit/test_core.py
+  - A  tests/unit/test_core_git.py
+  - A  tests/unit/test_delivery_git_failures.py
+  - A  tests/unit/test_delivery_without_a_repository.py
+  - A  tests/unit/test_git_hooks.py
+  - A  tests/unit/test_installer_modes.py
+  - A  tests/unit/test_schema_validation.py
+completed_work:
+- Implemented playbook artifacts or recorded current progress.
+commands:
+- uv sync --locked
+- uv run ruff format --check .
+- uv run ruff check .
+- uv run pyright
+- uv run pytest
+- uv run python scripts/verify.py
+- uv run python scripts/doctor.py
+- uv run python scripts/resume.py
+- uv run python scripts/reconcile.py
+- uv run python scripts/bootstrap.py
+- uv run python scripts/delivery.py status
+- uv run python scripts/checkpoint.py
+- engineering-playbook checkpoint
+validation:
+  passed:
+  - uv sync --locked
+  - uv run ruff format --check .
+  - uv run ruff check .
+  - uv run pyright
+  - uv run pytest
+  - uv run python scripts/verify.py
+  - uv run python scripts/doctor.py
+  - uv run python scripts/resume.py
+  - uv run python scripts/reconcile.py
+  - uv run python scripts/bootstrap.py
+  - uv run python scripts/delivery.py status
+  - uv run python scripts/checkpoint.py
+  - engineering-playbook checkpoint
+  failed: []
+  not_run: []
+blockers: []
+next_action: Retomar com uv run python scripts/resume.py antes de novas mudancas.

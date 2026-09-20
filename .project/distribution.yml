@@ -27,6 +27,7 @@ include:
     - ".devin/rules/engineering.md"
   directories:
     - ".project/schemas"
+    - ".claude/agents"
     - "docs/agents"
     - "docs/context"
     - "docs/decisions"

@@ -1,0 +1,129 @@
+#!/usr/bin/env bash
+#
+# pre-push -- gate a push on this repository's own CI, DERIVED from
+# `.github/workflows` via `scripts/local_ci.py`, instead of a second list of
+# commands kept by hand.
+#
+# =============================================================================
+# WHY THIS FILE EXISTS
+#
+# A hand-written list of "the commands CI runs" is a list that lies the day a
+# workflow file changes and nobody updates the copy. This hook does not carry
+# that list: it calls `scripts/local_ci.py`, which reads
+# `.github/workflows/*.yml` itself and derives which `run:` steps are code,
+# which need the GitHub runner, and which build the environment (see that
+# file's own docstring for the classification). This hook only reads the exit
+# code `scripts/local_ci.py` returns and turns it into a push decision.
+#
+# =============================================================================
+# THREE VERDICTS THAT MUST NEVER ADD UP TO ONE "VERMELHO"
+#
+#   1. TESTE VERMELHO -- a code step that `local_ci.py` ran (ruff, pyright,
+#      pytest, `scripts/verify.py`, ...) exited non-zero on its own logic.
+#      This is the only case that should ever be read as "the change is bad".
+#
+#   2. FALHA DE MAQUINA -- the `local_ci.py` process itself was killed by a
+#      signal (OOM killer, `kill -9`, a crash) rather than exiting on its own.
+#      In POSIX shells, an exit status above 128 is always `128 + signal
+#      number`, never a value the program chose -- so `$STATUS -gt 128` is
+#      read as machine death, independent of what any step inside was doing.
+#      This says nothing about the code; the run did not finish measuring it.
+#
+#   3. FALHA DE AMBIENTE -- something the CI needs is missing HERE: `uv` or
+#      `bash` not on `PATH` (checked below before anything runs), or exit 127
+#      -- the shell's own convention for "command not found" -- surfacing
+#      from inside the run. `local_ci.py` also exits `2` when it cannot even
+#      classify the workflow's steps (e.g. `.github/workflows` missing). None
+#      of this says anything about the code either.
+#
+# Folding these three into one "push blocked" would refuse a push for a
+# reason the author cannot fix by editing code, and would train everyone to
+# reach for `--no-verify` the moment any of the three fires -- which defeats
+# case 1, the one this hook exists for.
+#
+# =============================================================================
+# THE KNOWN WAYS PAST THIS GUARD, WRITTEN ON PURPOSE
+#
+# A guard whose weakness is unwritten is theatre, not a guard. So:
+#
+#   1. `git push --no-verify` skips this file entirely. Nothing here can turn
+#      that off; a push made this way was never measured by this hook.
+#   2. `git config core.hooksPath <somewhere-else>` points git at another
+#      directory and nothing in this one runs at all. This file cannot detect
+#      that it was bypassed this way.
+#
+# What this guard does NOT do: it does not run `--affected` (that mode is
+# documented in `local_ci.py` as narrower than the merge gate on purpose), it
+# does not push anything itself, and it does not judge branch names or commit
+# messages -- see `pre-commit` for the one check this repository makes at
+# commit time.
+# =============================================================================
+
+set -uo pipefail
+
+REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || echo "")"
+if [ -z "$REPO_ROOT" ]; then
+    echo "pre-push: nao consegui resolver a raiz do repositorio via git; abortando." >&2
+    exit 1
+fi
+cd "$REPO_ROOT" || exit 1
+
+fail_environment() {
+    cat >&2 <<EOF
+
+  BLOQUEADO POR AMBIENTE, NAO POR CODIGO: $1
+
+  Isto nao mede nada sobre o que voce mudou. Resolva o ambiente e rode de
+  novo. 'git push --no-verify' pula este hook inteiro, se voce souber o que
+  esta fazendo -- mas isso significa que este push nao foi medido por ele.
+
+EOF
+    exit 1
+}
+
+command -v uv >/dev/null 2>&1 || fail_environment "'uv' nao foi encontrado no PATH"
+command -v bash >/dev/null 2>&1 || fail_environment "'bash' nao foi encontrado no PATH (os workflows sao bash)"
+
+echo "pre-push: derivando o CI de .github/workflows via scripts/local_ci.py ..." >&2
+
+uv run python scripts/local_ci.py
+STATUS=$?
+
+if [ "$STATUS" -gt 128 ]; then
+    SIGNAL=$((STATUS - 128))
+    cat >&2 <<EOF
+
+  BLOQUEADO POR FALHA DE MAQUINA, NAO POR CODIGO: o processo do CI local
+  morreu pelo sinal $SIGNAL (exit $STATUS = 128 + sinal), nao pela logica de
+  nenhum passo. A corrida nao terminou de medir o que voce mudou.
+
+  Rode 'uv run python scripts/local_ci.py' de novo, sozinho, para ver se o
+  sinal se repete (memoria, processo morto por fora, etc.) antes de tentar o
+  push outra vez.
+
+EOF
+    exit 1
+fi
+
+if [ "$STATUS" -eq 127 ]; then
+    fail_environment "um comando dentro do CI local nao foi encontrado (exit 127)"
+fi
+
+if [ "$STATUS" -eq 2 ]; then
+    fail_environment "scripts/local_ci.py nao conseguiu classificar os passos do workflow (exit 2) -- veja a saida acima"
+fi
+
+if [ "$STATUS" -ne 0 ]; then
+    cat >&2 <<EOF
+
+  PUSH RECUSADO: o CI local, derivado de .github/workflows, rodou e um passo
+  de CODIGO falhou (exit $STATUS). Veja a saida acima para o passo e o motivo.
+
+  Isto NAO e o portao de merge -- e a mesma verificacao rodando aqui antes de
+  gastar um minuto do Actions. Corrija e rode de novo.
+
+EOF
+    exit 1
+fi
+
+exit 0

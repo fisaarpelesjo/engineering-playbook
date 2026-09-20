@@ -10,9 +10,11 @@ from typing import Any
 try:
     from .core import (
         ROOT,
+        GitUnavailableError,
         git_branch,
         git_capture,
         git_head,
+        git_ref_exists,
         git_status,
         load_yaml,
         utc_now,
@@ -23,9 +25,11 @@ try:
 except ImportError:
     from engineering_playbook.core import (
         ROOT,
+        GitUnavailableError,
         git_branch,
         git_capture,
         git_head,
+        git_ref_exists,
         git_status,
         load_yaml,
         utc_now,
@@ -49,6 +53,7 @@ BRANCH_TYPES = {
 }
 REMOTE_COMMANDS = {"publish", "merge"}
 PREPARE_FILE = ".project/delivery/prepare.yml"
+STATE_FILE = ".project/state.yml"
 PR_BODY_FILE = ".project/delivery/pr.md"
 SECRET_PATTERNS = [
     re.compile(r"(?i)(api[_-]?key|secret|token|password)\s*[:=]\s*['\"][^'\"]+['\"]"),
@@ -83,16 +88,39 @@ def validate_pr_title(title: str) -> bool:
 
 
 def local_commits(root: Path, base: str = "main") -> list[str]:
+    """Commits on HEAD that `base` does not have yet.
+
+    `git log {base}..HEAD` fails with "unknown revision" (exit 128) when `base` itself
+    has not been born -- a fresh repository, or a base branch this checkout never
+    fetched. That is the same legitimate "not yet" `git_head`/`git_parent` already grant
+    an unborn ref, so it is answered the same way, with `git_ref_exists` rather than by
+    reading absence into whatever git happened to print. Once `base` resolves, `git log`
+    answering with an empty, exit-0 result IS "no commits ahead" -- that case needs no
+    special handling, `git_capture` already returns "" for it. Any other failure is real
+    and is left to raise `GitUnavailableError`.
+    """
+    if not git_ref_exists(root, base):
+        return []
     output = git_capture(root, "log", "--oneline", f"{base}..HEAD")
     return [line for line in output.splitlines() if line.strip()]
 
 
 def staged_files(root: Path) -> list[str]:
+    """Paths staged for commit. "Nothing staged" is exit 0 with empty stdout, not a
+    failure -- `git diff --cached --name-only` answers that way whether or not the
+    repository has any commits yet. No fallback is needed here: `git_capture` already
+    returns "" for that legitimate case and raises `GitUnavailableError` for a real one
+    (not a repository, index.lock held).
+    """
     output = git_capture(root, "diff", "--cached", "--name-only")
     return [line for line in output.splitlines() if line.strip()]
 
 
 def changed_files(root: Path) -> list[str]:
+    """Paths changed in the working tree or the index, combined. Same reasoning as
+    `staged_files`: "nothing changed" is a legitimate exit-0 empty answer, not a
+    fallback value, and a real git failure still raises `GitUnavailableError` unmodified.
+    """
     output = git_capture(root, "diff", "--name-only")
     files = [line for line in output.splitlines() if line.strip()]
     files.extend(staged_files(root))
@@ -159,9 +187,18 @@ def prepare_is_fresh(root: Path) -> tuple[bool, str]:
     if not path.exists():
         return False, "prepare file is missing"
     data = load_yaml(path)
-    if data.get("head") != git_head(root):
+    # A prepare file can outlive the repository it described -- a clone gone,
+    # a .git removed. Git failing here is not a stale prepare and not a fresh
+    # one: it is an answer we do not have, so say that instead of raising a
+    # traceback at whichever command asked.
+    try:
+        head = git_head(root)
+        branch = git_branch(root)
+    except GitUnavailableError as failure:
+        return False, f"prepare could not be checked: git did not answer: {failure}"
+    if data.get("head") != head:
         return False, "prepare is obsolete: HEAD changed"
-    if data.get("branch") != git_branch(root):
+    if data.get("branch") != branch:
         return False, "prepare is obsolete: branch changed"
     if data.get("status") != "approved":
         return False, "prepare is not approved"
@@ -282,7 +319,13 @@ def command_prepare(args: argparse.Namespace) -> int:
         for error in result.errors:
             print(f"ERROR: {error}")
         return 1
-    files = changed_files(args.root)
+    try:
+        files = changed_files(args.root)
+    except GitUnavailableError as failure:
+        print(
+            f"ERROR: git nao respondeu, portanto os arquivos alterados nao foram medidos: {failure}"
+        )
+        return 1
     body = pr_body(title, files)
     write_yaml_atomic(args.root / PREPARE_FILE, delivery_state(args.root, title, body, files))
     (args.root / PR_BODY_FILE).write_text(body, encoding="utf-8", newline="\n")
@@ -300,7 +343,11 @@ def command_commit(args: argparse.Namespace) -> int:
     if not fresh:
         print(f"ERROR: {reason}")
         return 1
-    files = staged_files(args.root)
+    try:
+        files = staged_files(args.root)
+    except GitUnavailableError as failure:
+        print(f"ERROR: git nao respondeu, portanto os arquivos staged nao foram medidos: {failure}")
+        return 1
     if not files:
         print("ERROR: no staged files.")
         return 1
@@ -323,10 +370,54 @@ def command_commit(args: argparse.Namespace) -> int:
     if completed.returncode != 0:
         print(completed.stderr.strip())
         return completed.returncode
-    prepare["head"] = git_head(args.root)
+    committed = git_head(args.root)
+    prepare["head"] = committed
     write_yaml_atomic(args.root / PREPARE_FILE, prepare)
+    record_verified_commit(args.root, committed)
     print(completed.stdout.strip())
     return 0
+
+
+def record_verified_commit(root: Path, commit: str) -> None:
+    """Move `last_verified_commit` to the commit whose content was measured.
+
+    `prepare` runs the gates against the working tree and `commit` turns that
+    exact tree into a commit, so that commit is what was verified. Leaving the
+    field behind makes the next `verify` fail for bookkeeping reasons, and the
+    only way out was editing the state by hand -- which is how a state file
+    starts claiming what nobody measured.
+    """
+    state_path = root / STATE_FILE
+    if not state_path.is_file():
+        return
+    state = load_yaml(state_path)
+    if state.get("status") not in {"verified", "converged", "done"}:
+        return
+    if state.get("last_verified_commit") == commit:
+        return
+    state["last_verified_commit"] = commit
+    state["updated_at"] = utc_now()
+    write_yaml_atomic(state_path, state)
+
+
+def remote_url(root: Path, remote: str) -> str | None:
+    """URL configured for `remote`, or None when it is simply not configured.
+
+    `git remote get-url <name>` exits 2 with "No such remote" for a repository that
+    never had that remote added -- a legitimate state (nothing has been pushed from
+    here yet), not a git failure, so it is read directly instead of going through
+    `git_capture` (which would raise on that exit code). Any other non-zero exit (not a
+    repository, corrupt config) is a real failure and raises `GitUnavailableError`.
+    """
+    completed = run(root, ["git", "remote", "get-url", remote])
+    if completed.returncode == 2:
+        return None
+    if completed.returncode != 0:
+        raise GitUnavailableError(
+            f"git remote get-url {remote} saiu com {completed.returncode}: "
+            f"{completed.stderr.strip() or 'sem stderr'}"
+        )
+    return completed.stdout.strip()
 
 
 def require_remote_authorization(args: argparse.Namespace) -> bool:
@@ -349,12 +440,21 @@ def command_publish(args: argparse.Namespace) -> int:
     if not fresh:
         print(f"ERROR: {reason}")
         return 1
-    if not local_commits(args.root, args.base):
+    try:
+        commits_to_publish = local_commits(args.root, args.base)
+    except GitUnavailableError as failure:
+        print(f"ERROR: git nao respondeu, portanto os commits locais nao foram medidos: {failure}")
+        return 1
+    if not commits_to_publish:
         print("ERROR: no local commit to publish.")
         return 1
     remote = args.remote or "origin"
-    remote_url = git_capture(args.root, "remote", "get-url", remote)
-    if not remote_url:
+    try:
+        resolved_remote_url = remote_url(args.root, remote)
+    except GitUnavailableError as failure:
+        print(f"ERROR: git nao respondeu, portanto o remote nao foi verificado: {failure}")
+        return 1
+    if not resolved_remote_url:
         print(f"ERROR: remote not found: {remote}")
         return 1
     run(args.root, ["uv", "run", "python", "scripts/checkpoint.py"])
@@ -396,7 +496,9 @@ def command_publish(args: argparse.Namespace) -> int:
     output = pr.stdout.strip()
     print(output)
     pr_view = run(args.root, ["gh", "pr", "view", branch, "--json", "number,url"])
-    pr_data = json.loads(pr_view.stdout) if pr_view.returncode == 0 and pr_view.stdout else {}
+    pr_data: dict[str, Any] = (
+        json.loads(pr_view.stdout) if pr_view.returncode == 0 and pr_view.stdout else {}
+    )
     state_path = args.root / ".project/state.yml"
     state = load_yaml(state_path)
     state["delivery"] = {
@@ -443,10 +545,17 @@ def command_merge(args: argparse.Namespace) -> int:
 
 
 def command_status(args: argparse.Namespace) -> int:
-    fresh, reason = prepare_is_fresh(args.root)
-    print(f"branch: {git_branch(args.root)}")
-    print(f"head: {git_head(args.root)}")
-    print(f"dirty_paths: {len(git_status(args.root))}")
+    # status reports the reason either way, so the freshness flag itself is
+    # not read here -- only the sentence that explains it.
+    _, reason = prepare_is_fresh(args.root)
+    # status is a diagnostic: it reports what it could not measure and keeps
+    # going, rather than dying on the first question git cannot answer.
+    try:
+        print(f"branch: {git_branch(args.root)}")
+        print(f"head: {git_head(args.root)}")
+        print(f"dirty_paths: {len(git_status(args.root))}")
+    except GitUnavailableError as failure:
+        print(f"branch: unmeasured (git did not answer: {failure})")
     print(f"prepare: {reason}")
     if (args.root / PREPARE_FILE).exists():
         prepare = load_yaml(args.root / PREPARE_FILE)
@@ -459,7 +568,12 @@ def command_status(args: argparse.Namespace) -> int:
     delivery = state.get("delivery", {})
     print(f"pr: {delivery.get('pr_url', 'not recorded')}")
     print("ci: not queried")
-    print(f"local_commits: {len(local_commits(args.root, args.base))}")
+    try:
+        commit_count = len(local_commits(args.root, args.base))
+    except GitUnavailableError as failure:
+        print(f"local_commits: unmeasured (git nao respondeu: {failure})")
+    else:
+        print(f"local_commits: {commit_count}")
     print("remote: not queried")
     print("next: run prepare, commit, publish or merge according to the current gate")
     return 0

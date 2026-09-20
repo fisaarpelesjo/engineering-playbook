@@ -1,0 +1,43 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Local CI receipt",
+  "description": "Proof that a local battery ran: against which commit, how completely, and with which tree state. Written by whichever script runs the local battery (e.g. scripts/local_ci.py); read by engineering_playbook.receipt so a checkpoint that claims a green battery can be checked against it. Absence of this file is never read as green.",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "kind",
+    "ran_at",
+    "head",
+    "head_before_run",
+    "tree_was_dirty_before_run",
+    "tree_changed_during_run",
+    "dirty_paths",
+    "red",
+    "partial",
+    "green",
+    "affected_mode",
+    "dry_run",
+    "workflows_available",
+    "workflows_requested",
+    "workflows_run"
+  ],
+  "properties": {
+    "schema_version": {"type": "integer", "minimum": 1},
+    "kind": {"type": "string", "const": "local_ci_receipt"},
+    "ran_at": {"type": "string"},
+    "head": {"type": "string"},
+    "head_before_run": {"type": "string"},
+    "tree_was_dirty_before_run": {"type": "boolean"},
+    "tree_was_dirty": {"type": "boolean"},
+    "tree_changed_during_run": {"type": "boolean"},
+    "dirty_paths": {"type": "integer", "minimum": 0},
+    "red": {"type": "integer", "minimum": 0},
+    "partial": {"type": "integer", "minimum": 0},
+    "green": {"type": "integer", "minimum": 0},
+    "affected_mode": {"type": "boolean"},
+    "dry_run": {"type": "boolean"},
+    "workflows_available": {"type": "integer", "minimum": 0},
+    "workflows_requested": {"type": "integer", "minimum": 0},
+    "workflows_run": {"type": "integer", "minimum": 0}
+  }
+}
