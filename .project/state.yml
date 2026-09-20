@@ -1,5 +1,5 @@
 schema_version: 1.0.0
-updated_at: '2026-09-20T04:06:34Z'
+updated_at: '2026-09-20T04:16:02Z'
 active_workstream: WS-001
 current_branch: feat/003-loop-receipt-and-strict
 current_phase: converge
@@ -8,7 +8,7 @@ active_specification: specs/001-engineering-playbook/spec.md
 active_plan: specs/001-engineering-playbook/plan.md
 active_tasks: specs/001-engineering-playbook/tasks.md
 active_task: T017
-last_checkpoint: .project/checkpoints/CP-20260920-001.yml
+last_checkpoint: .project/checkpoints/CP-20260920-003.yml
 last_verified_commit: 455d924cbba10115973f447014f908aba43c85cd
 validation:
   passed:
@@ -31,9 +31,9 @@ blockers: []
 next_actions:
 - Retomar com uv run python scripts/resume.py antes de novas mudancas.
 delivery:
-  branch: feat/020-cli-packaging
+  branch: feat/003-loop-receipt-and-strict
   base: main
   remote: origin
-  pr_number: 1
-  pr_url: https://github.com/fisaarpelesjo/engineering-playbook/pull/1
-  updated_at: '2026-09-07T21:21:12Z'
+  pr_number: 5
+  pr_url: https://github.com/fisaarpelesjo/engineering-playbook/pull/5
+  updated_at: '2026-09-20T04:12:11Z'

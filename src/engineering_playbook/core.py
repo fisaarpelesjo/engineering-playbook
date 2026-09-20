@@ -363,6 +363,21 @@ def git_parent(root: Path) -> str:
     return git_capture(root, "rev-parse", "--verify", "HEAD^")
 
 
+def git_parents(root: Path) -> list[str]:
+    """Every parent of HEAD, not only the first.
+
+    A pull request is built on a merge commit whose FIRST parent is the base
+    branch and whose second is the branch under review. Reading only `HEAD^`
+    there answers about main, so a state verified on the branch reads as
+    unverified and the gate goes red for a reason that has nothing to do with
+    the work. An unborn HEAD has no parents, which is an answer, not an error.
+    """
+    if not git_ref_exists(root, "HEAD"):
+        return []
+    line = git_capture(root, "rev-list", "--parents", "-n", "1", "HEAD")
+    return line.split()[1:]
+
+
 def git_status(root: Path) -> list[str]:
     output = git_capture(root, "status", "--short")
     return [line for line in output.splitlines() if line.strip()]
@@ -671,16 +686,16 @@ def verify_root(root: Path) -> CheckResult:
             )
         if state.get("status") in {"verified", "converged", "done"}:
             try:
-                head, parent = git_head(root), git_parent(root)
+                accepted = {git_head(root), *git_parents(root)}
             except GitUnavailableError as failure:
                 result.errors.append(
                     f"git nao respondeu, portanto last_verified_commit nao foi comparado: {failure}"
                 )
             else:
                 result.add(
-                    state.get("last_verified_commit") in {head, parent},
+                    state.get("last_verified_commit") in accepted,
                     "Verified/converged state requires last_verified_commit to match HEAD "
-                    "or its parent commit",
+                    "or one of its parent commits",
                 )
 
     if not source_repository:
