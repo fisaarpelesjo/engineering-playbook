@@ -8,12 +8,16 @@ bookkeeping reasons alone. Measured on two real pull requests (PR 5 and PR 6):
 main HEAD = 8db0c1f, state.last_verified_commit = 2af1716 (the branch tip),
 and `git merge-base --is-ancestor 2af1716 origin/main` said NAO.
 
-The same two pull requests also measured a second defect: `command_merge` ran
-`scripts/checkpoint.py` -- which writes `.project/state.yml` -- BEFORE
-`gh pr merge --delete-branch`, so the tree was already dirty when `--delete-
-branch` tried to switch to main, and `gh` failed with "Your local changes to
-the following files would be overwritten by checkout ... Aborting" even
-though the squash merge had already succeeded on the server.
+The same two pull requests also measured a second defect, issue #18: the tree was
+already dirty before `merge` ever ran -- `publish` had already written
+`.project/state.yml` -- so `gh pr merge --auto --squash --delete-branch` failed
+with "Your local changes to the following files would be overwritten by
+checkout ... Aborting" while trying to check out main to delete the branch,
+even though the squash merge had already succeeded on the server. `command_merge`
+returned that non-zero exit code as if the merge itself had failed, so
+`record_merge_commit` was never reached and the squash SHA was never recorded.
+Measured on PR #17: `gh pr merge` exited non-zero while `gh pr view --json
+state,mergeCommit` for the same branch read `MERGED` on the server.
 """
 
 from __future__ import annotations
@@ -73,8 +77,15 @@ def args_for(root: Path) -> argparse.Namespace:
     return argparse.Namespace(root=root, auto=True, yes_remote=True)
 
 
-def gh_fake_run(calls: list[list[str]], *, merged: bool, merge_commit: str | None):
-    """A stand-in for `delivery.run` that never shells out to a real `gh` or `git fetch`."""
+def gh_fake_run(
+    calls: list[list[str]],
+    *,
+    merged: bool,
+    merge_commit: str | None,
+    merge_returncode: int = 0,
+    merge_stderr: str = "",
+):
+    """A stand-in for `delivery.run` that never shells out to a real `gh` or `git`."""
 
     def fake(root: Path, cmd_args: list[str]) -> subprocess.CompletedProcess[str]:
         calls.append(cmd_args)
@@ -83,6 +94,8 @@ def gh_fake_run(calls: list[list[str]], *, merged: bool, merge_commit: str | Non
                 cmd_args, 0, json.dumps({"title": "feat: example", "number": 1}), ""
             )
         if cmd_args[:3] == ["gh", "pr", "merge"]:
+            if merge_returncode != 0:
+                return subprocess.CompletedProcess(cmd_args, merge_returncode, "", merge_stderr)
             return subprocess.CompletedProcess(cmd_args, 0, "Merge activated.", "")
         if cmd_args[:3] == ["gh", "pr", "view"] and "state,mergeCommit" in cmd_args:
             payload = {
@@ -92,11 +105,12 @@ def gh_fake_run(calls: list[list[str]], *, merged: bool, merge_commit: str | Non
             return subprocess.CompletedProcess(cmd_args, 0, json.dumps(payload), "")
         if cmd_args[:2] == ["git", "fetch"]:
             return subprocess.CompletedProcess(cmd_args, 0, "", "")
+        if cmd_args[:4] == ["git", "push", "origin", "--delete"]:
+            # Deleting the remote branch needs no local checkout, unlike `--delete-branch`
+            # passed straight to `gh pr merge` -- see the module docstring.
+            return subprocess.CompletedProcess(cmd_args, 0, "", "")
         if cmd_args[:1] == ["uv"]:
-            # The local cleanup step: made to fail, the way a dirty tree made it fail on
-            # the two pull requests this was measured against. A successful server merge
-            # must not turn into a non-zero exit because of this.
-            return subprocess.CompletedProcess(cmd_args, 1, "", "checkpoint refused: dirty tree")
+            return subprocess.CompletedProcess(cmd_args, 0, "", "")
         raise AssertionError(f"unexpected command: {cmd_args}")
 
     return fake
@@ -121,26 +135,77 @@ def test_a_squash_merge_records_the_squash_commit_not_the_branch_tip(
     assert state["last_verified_commit"] != branch_tip
 
 
-def test_a_successful_server_merge_exits_zero_even_when_local_cleanup_fails(
+CHECKOUT_STDERR = (
+    "error: Your local changes to the following files would be overwritten by checkout:\n"
+    "\t.project/state.yml\nAborting"
+)
+
+
+def test_a_successful_server_merge_exits_zero_even_when_gh_pr_merge_itself_fails(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    """Issue #18, measured on PR #17: `gh pr merge` itself exited non-zero -- not a later,
+    separate cleanup step -- because `publish` had already dirtied the tree before `merge`
+    ever ran, and the checkout `--delete-branch` needs choked on it. This is what the old
+    version of this test modeled wrong: it made `scripts/checkpoint.py` (run AFTER `gh pr
+    merge`) fail, so `gh pr merge` itself always exited 0 and the exact failure that
+    reached production -- `gh pr merge` returning non-zero for a merge that had already
+    succeeded on the server -- was never exercised.
+    """
     root = tmp_path / "repo"
     repo_on_a_pull_request_branch(root)
     calls: list[list[str]] = []
     monkeypatch.setattr(
         "engineering_playbook.delivery.run",
-        gh_fake_run(calls, merged=True, merge_commit=SQUASH_COMMIT),
+        gh_fake_run(
+            calls,
+            merged=True,
+            merge_commit=SQUASH_COMMIT,
+            merge_returncode=1,
+            merge_stderr=CHECKOUT_STDERR,
+        ),
     )
 
     exit_code = command_merge(args_for(root))
 
     assert exit_code == 0
-    # The local cleanup command must run only after `gh pr merge` has already been asked
-    # to merge and delete the branch -- never before, which is what dirtied the tree the
-    # `--delete-branch` checkout needed clean.
+    state = load_yaml(root / STATE_FILE)
+    assert state["last_verified_commit"] == SQUASH_COMMIT
+    # The PR's own state -- not `gh pr merge`'s exit code -- is what decided this was a
+    # success; a real failure (below) still returns non-zero from the very same call.
     merge_index = next(i for i, c in enumerate(calls) if c[:3] == ["gh", "pr", "merge"])
     checkpoint_index = next(i for i, c in enumerate(calls) if c[:1] == ["uv"])
     assert checkpoint_index > merge_index
+
+
+def test_a_gh_pr_merge_failure_that_really_did_not_merge_stays_a_failure(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The other side of issue #18: a non-zero `gh pr merge` must not be waved through as
+    success just because *some* non-zero exit can mean "already merged, cleanup failed".
+    When the pull request itself is not MERGED, this is a real failure and nothing is
+    recorded.
+    """
+    root = tmp_path / "repo"
+    branch_tip = repo_on_a_pull_request_branch(root)
+    calls: list[list[str]] = []
+    monkeypatch.setattr(
+        "engineering_playbook.delivery.run",
+        gh_fake_run(
+            calls,
+            merged=False,
+            merge_commit=None,
+            merge_returncode=1,
+            merge_stderr="error: GraphQL: Pull request is not mergeable",
+        ),
+    )
+
+    exit_code = command_merge(args_for(root))
+
+    assert exit_code != 0
+    assert not any(c[:2] == ["git", "fetch"] for c in calls)
+    state = load_yaml(root / STATE_FILE)
+    assert state["last_verified_commit"] == branch_tip
 
 
 def test_a_queued_auto_merge_records_nothing_and_is_distinct_from_a_failure(
