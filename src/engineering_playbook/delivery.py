@@ -53,6 +53,7 @@ BRANCH_TYPES = {
 }
 REMOTE_COMMANDS = {"publish", "merge"}
 PREPARE_FILE = ".project/delivery/prepare.yml"
+STATE_FILE = ".project/state.yml"
 PR_BODY_FILE = ".project/delivery/pr.md"
 SECRET_PATTERNS = [
     re.compile(r"(?i)(api[_-]?key|secret|token|password)\s*[:=]\s*['\"][^'\"]+['\"]"),
@@ -369,10 +370,34 @@ def command_commit(args: argparse.Namespace) -> int:
     if completed.returncode != 0:
         print(completed.stderr.strip())
         return completed.returncode
-    prepare["head"] = git_head(args.root)
+    committed = git_head(args.root)
+    prepare["head"] = committed
     write_yaml_atomic(args.root / PREPARE_FILE, prepare)
+    record_verified_commit(args.root, committed)
     print(completed.stdout.strip())
     return 0
+
+
+def record_verified_commit(root: Path, commit: str) -> None:
+    """Move `last_verified_commit` to the commit whose content was measured.
+
+    `prepare` runs the gates against the working tree and `commit` turns that
+    exact tree into a commit, so that commit is what was verified. Leaving the
+    field behind makes the next `verify` fail for bookkeeping reasons, and the
+    only way out was editing the state by hand -- which is how a state file
+    starts claiming what nobody measured.
+    """
+    state_path = root / STATE_FILE
+    if not state_path.is_file():
+        return
+    state = load_yaml(state_path)
+    if state.get("status") not in {"verified", "converged", "done"}:
+        return
+    if state.get("last_verified_commit") == commit:
+        return
+    state["last_verified_commit"] = commit
+    state["updated_at"] = utc_now()
+    write_yaml_atomic(state_path, state)
 
 
 def remote_url(root: Path, remote: str) -> str | None:
