@@ -10,7 +10,9 @@
       "properties": {
         "name": {"type": "string"},
         "language": {"type": "string"},
-        "default_workflow_profile": {"type": "string"}
+        "default_workflow_profile": {"type": "string"},
+        "owner": {"type": "string"},
+        "operating_model": {"type": "string"}
       }
     },
     "spec_kit": {
@@ -24,7 +26,25 @@
     },
     "commands": {"type": "object"},
     "sources": {"type": "array", "items": {"type": "object"}},
-    "supported_agents": {"type": "array", "items": {"type": "string"}, "minItems": 1}
+    "supported_agents": {"type": "array", "items": {"type": "string"}, "minItems": 1},
+    "canonical_documents": {
+      "type": "object",
+      "required": ["entrypoint", "engineering", "loop", "agent_policy", "owner_orders"],
+      "properties": {
+        "entrypoint": {"type": "string"},
+        "adapter_claude": {"type": "string"},
+        "engineering": {"type": "string"},
+        "review": {"type": "string"},
+        "loop": {"type": "string"},
+        "agent_policy": {"type": "string"},
+        "owner_orders": {"type": "string"},
+        "reporting_contract": {"type": "string"},
+        "handoff": {"type": "string"},
+        "recovery": {"type": "string"},
+        "constitution": {"type": "string"}
+      }
+    },
+    "subagents_directory": {"type": "string"}
   }
 }
 

@@ -226,7 +226,7 @@ def manifest_paths() -> tuple[list[str], list[str]]:
     paths: list[str] = list(manifest.get("include", {}).get("files", []))
     for directory in manifest.get("include", {}).get("directories", []):
         paths.extend(iter_resource_files(directory))
-    allowed = []
+    allowed: list[str] = []
     for path in sorted(set(paths)):
         rel = normalize_rel(path)
         if any(rel == item or rel.startswith(f"{item}/") for item in excluded):
@@ -263,19 +263,30 @@ def render_project_yml(
         "update": "engineering-playbook update",
         "tests": "uv run pytest",
     }
-    return {
+    project: dict[str, Any] = {
+        "name": project_name,
+        "language": source["project"]["language"],
+        "default_workflow_profile": profile,
+        "stack": stack,
+    }
+    # The schema allows these, and a field the installer never emits is a
+    # field no derived project ever fills in: carry across whatever the
+    # template declares, and leave out what it does not.
+    for optional in ("owner", "operating_model"):
+        if optional in source["project"]:
+            project[optional] = source["project"][optional]
+    rendered: dict[str, Any] = {
         "schema_version": source["schema_version"],
-        "project": {
-            "name": project_name,
-            "language": source["project"]["language"],
-            "default_workflow_profile": profile,
-            "stack": stack,
-        },
+        "project": project,
         "spec_kit": source["spec_kit"],
         "commands": commands,
         "sources": source["sources"],
         "supported_agents": agents,
     }
+    for optional in ("canonical_documents", "subagents_directory"):
+        if optional in source:
+            rendered[optional] = source[optional]
+    return rendered
 
 
 def render_pyproject(project_name: str) -> str:
@@ -398,7 +409,7 @@ def build_plan(
 
 
 def build_lock(plan: InstallPlan, source: str) -> dict[str, Any]:
-    managed_entries = []
+    managed_entries: list[dict[str, str]] = []
     for rel in plan.managed:
         if resource_exists(rel):
             managed_entries.append(

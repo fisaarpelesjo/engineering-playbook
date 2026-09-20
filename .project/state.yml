@@ -1,7 +1,7 @@
 schema_version: 1.0.0
-updated_at: '2026-09-19T22:34:51Z'
+updated_at: '2026-09-20T02:29:44Z'
 active_workstream: WS-001
-current_branch: feat/002-hardening-from-derived
+current_branch: feat/003-loop-receipt-and-strict
 current_phase: converge
 status: converged
 active_specification: specs/001-engineering-playbook/spec.md
@@ -9,7 +9,7 @@ active_plan: specs/001-engineering-playbook/plan.md
 active_tasks: specs/001-engineering-playbook/tasks.md
 active_task: T017
 last_checkpoint: .project/checkpoints/CP-20260919-001.yml
-last_verified_commit: 052a9f822dccb7464396ba18b3e70ea52b6550c8
+last_verified_commit: cef4af990037fdceb6a32d41d17a5bfa8eef5955
 validation:
   passed:
   - uv sync --locked

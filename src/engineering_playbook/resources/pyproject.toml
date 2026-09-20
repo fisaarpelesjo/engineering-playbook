@@ -51,4 +51,4 @@ addopts = "-ra --strict-markers --strict-config"
 [tool.pyright]
 pythonVersion = "3.11"
 include = ["src", "scripts", "tests"]
-typeCheckingMode = "basic"
+typeCheckingMode = "strict"

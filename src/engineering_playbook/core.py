@@ -8,7 +8,7 @@ import subprocess
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import yaml
 from jsonschema import Draft202012Validator
@@ -186,7 +186,7 @@ REQUIRED_STACKS = [
     "sql",
 ]
 
-VALID_TRANSITIONS = {
+VALID_TRANSITIONS: dict[str, set[str]] = {
     "proposed": {"clarified", "planned", "abandoned", "blocked"},
     "clarified": {"planned", "blocked", "abandoned"},
     "planned": {"ready", "in_progress", "blocked", "abandoned"},
@@ -266,7 +266,13 @@ def validate_schema(root: Path, data_path: str, schema_path: str) -> list[str]:
     schema = load_json(root / schema_path)
     validator = Draft202012Validator(schema)
     errors: list[str] = []
-    for error in sorted(validator.iter_errors(data), key=str):
+    # jsonschema's bundled stub (validators.pyi) leaves `instance` untyped on both
+    # `iter_errors` overloads, so the member itself is reported partially unknown
+    # regardless of how `data` is typed here -- a third-party stub limitation.
+    for error in sorted(
+        validator.iter_errors(data),  # pyright: ignore[reportUnknownMemberType]
+        key=str,
+    ):
         field = ".".join(str(part) for part in error.path)
         label = f"{data_path}.{field}" if field else data_path
         errors.append(f"{label}: {error.message}")
@@ -374,7 +380,7 @@ def next_checkpoint_id(root: Path) -> str:
 
 
 def validate_transition(old: str, new: str) -> bool:
-    return new in VALID_TRANSITIONS.get(old, set())
+    return new in VALID_TRANSITIONS.get(old, set[str]())
 
 
 def find_ids(text: str, prefix: str) -> list[str]:
@@ -397,7 +403,7 @@ def extract_front_matter(text: str) -> tuple[dict[str, Any], str]:
     end = text.find("\n---\n", 4)
     if end == -1:
         return {}, text
-    metadata = yaml.safe_load(text[4:end]) or {}
+    metadata: dict[str, Any] = yaml.safe_load(text[4:end]) or {}
     return metadata, text[end + 5 :]
 
 
@@ -419,7 +425,9 @@ def extract_requirement_blocks(text: str) -> list[dict[str, Any]]:
             continue
         loaded = yaml.safe_load(block_text)
         if isinstance(loaded, dict) and "id" in loaded and "type" in loaded:
-            blocks.append(loaded)
+            # Boundary conversion: a YAML block confirmed to be a mapping with the
+            # two keys every requirement block must carry.
+            blocks.append(cast(dict[str, Any], loaded))
     return blocks
 
 
@@ -533,10 +541,11 @@ def validate_prd_document(path: Path, *, template: bool = False) -> list[str]:
         if not criteria:
             errors.append(f"{path}: requirement {requirement_id} has no acceptance criteria")
         elif isinstance(criteria, list):
-            for criterion in criteria:
-                if not isinstance(criterion, dict):
+            for raw_criterion in cast(list[Any], criteria):
+                if not isinstance(raw_criterion, dict):
                     errors.append(f"{path}: requirement {requirement_id} has invalid criterion")
                     continue
+                criterion = cast(dict[str, Any], raw_criterion)
                 criterion_id = str(criterion.get("id", ""))
                 if not re.match(r"^AC-[0-9]{3}$", criterion_id):
                     errors.append(
@@ -699,10 +708,10 @@ def verify_root(root: Path) -> CheckResult:
                     f"Derived state leaks source reference: {forbidden_text}",
                 )
 
-    project = (
+    project: dict[str, Any] = (
         load_yaml(root / ".project/project.yml") if (root / ".project/project.yml").exists() else {}
     )
-    spec_kit = project.get("spec_kit", {})
+    spec_kit: dict[str, Any] = project.get("spec_kit", {})
     result.add(spec_kit.get("version") == "v1.0.4", "Spec Kit version must be pinned to v1.0.4")
 
     pyproject_path = root / "pyproject.toml"
@@ -800,12 +809,13 @@ def verify_root(root: Path) -> CheckResult:
             "reconcile.py must require --apply for writes",
         )
 
-    workstreams = []
+    workstreams: list[dict[str, Any]] = []
     for path in (root / ".project/workstreams").glob("*.yml"):
         workstreams.append(load_yaml(path))
     owners: dict[str, str] = {}
     for ws in workstreams:
-        for owned in ws.get("owned_paths", []):
+        # workstream.schema.json fixes owned_paths as an array of strings.
+        for owned in cast(list[str], ws.get("owned_paths", [])):
             if owned == ".":
                 continue
             result.add(owned not in owners, f"Overlapping workstream ownership: {owned}")

@@ -471,7 +471,9 @@ def command_publish(args: argparse.Namespace) -> int:
     output = pr.stdout.strip()
     print(output)
     pr_view = run(args.root, ["gh", "pr", "view", branch, "--json", "number,url"])
-    pr_data = json.loads(pr_view.stdout) if pr_view.returncode == 0 and pr_view.stdout else {}
+    pr_data: dict[str, Any] = (
+        json.loads(pr_view.stdout) if pr_view.returncode == 0 and pr_view.stdout else {}
+    )
     state_path = args.root / ".project/state.yml"
     state = load_yaml(state_path)
     state["delivery"] = {

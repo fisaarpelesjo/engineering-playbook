@@ -16,6 +16,7 @@ from .core import (
     verify_root,
     write_yaml_atomic,
 )
+from .receipt import CiReceiptStatus, battery_claims, check_ci_receipt
 
 
 def command_verify(root: Path) -> int:
@@ -112,7 +113,7 @@ def command_reconcile(root: Path, apply: bool = False) -> int:
     return 0
 
 
-def command_checkpoint(root: Path) -> int:
+def command_checkpoint(root: Path, *, allow_divergent: bool = False) -> int:
     result = verify_root(root)
     if result.errors:
         for error in result.errors:
@@ -125,6 +126,27 @@ def command_checkpoint(root: Path) -> int:
     except GitUnavailableError as failure:
         print(f"ERROR: git nao respondeu, checkpoint nao foi gravado: {failure}")
         return 1
+
+    # A checkpoint that AFFIRMS a green battery (validation.passed claims one ran) must not be
+    # written unless the CI receipt covers this exact HEAD. Absence of a receipt, a receipt for
+    # another commit, a dirty tree, or a partial/red run are all refused, never read as green.
+    # allow_divergent is the explicit escape hatch: it writes the checkpoint anyway, but marks
+    # it battery_claim_divergent and the command still exits 1 -- a divergent stop must not look
+    # like a clean one.
+    battery_claim_divergent = False
+    if battery_claims(state):
+        receipt_check = check_ci_receipt(root, head)
+        if receipt_check.status is not CiReceiptStatus.COVERS:
+            if not allow_divergent:
+                print(f"checkpoint NAO gravado: {receipt_check.reason}")
+                print(
+                    "Rode a bateria de novo contra este HEAD, ou passe "
+                    "allow_divergent=True para registrar a parada divergente mesmo assim."
+                )
+                return 1
+            print(f"AVISO, e registrado: {receipt_check.reason}")
+            battery_claim_divergent = True
+
     checkpoint_id = next_checkpoint_id(root)
     checkpoint_rel = f".project/checkpoints/{checkpoint_id}.yml"
     passed = state.get("validation", {}).get("passed", [])
@@ -151,6 +173,7 @@ def command_checkpoint(root: Path) -> int:
         "validation": validation,
         "blockers": state.get("blockers", []),
         "next_action": state.get("next_actions", ["Run resume."])[0],
+        "battery_claim_divergent": battery_claim_divergent,
     }
     write_yaml_atomic(root / checkpoint_rel, checkpoint)
     state["last_checkpoint"] = checkpoint_rel
@@ -159,6 +182,13 @@ def command_checkpoint(root: Path) -> int:
     state["validation"] = validation
     write_yaml_atomic(state_path, state)
     print(checkpoint_rel)
+    if battery_claim_divergent:
+        print(
+            f"{checkpoint_rel} registra uma PARADA DIVERGENTE: a alegacao de bateria em "
+            "validation.passed nao foi conferida contra este HEAD. battery_claim_divergent: "
+            "true."
+        )
+        return 1
     return 0
 
 
