@@ -16,6 +16,10 @@ jobs:
         with:
           persist-credentials: false
           fetch-depth: 2
+          # On a pull request GitHub checks out a synthetic merge commit whose
+          # first parent is the base branch, so a state verified on the branch
+          # reads as stale. Verify the commit the author actually pushed.
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
       - name: Install uv
         uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
         with:
@@ -36,6 +40,10 @@ jobs:
         with:
           persist-credentials: false
           fetch-depth: 2
+          # On a pull request GitHub checks out a synthetic merge commit whose
+          # first parent is the base branch, so a state verified on the branch
+          # reads as stale. Verify the commit the author actually pushed.
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
       - name: Install uv
         uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
         with:
