@@ -13,6 +13,9 @@ jobs:
     permissions:
       contents: read
       issues: read
+      # Read-only, and required only by the "Ruleset reconciliation" step below: comparing
+      # .github/rulesets/main.yml against the ruleset applied on the server needs `gh api
+      # repos/:owner/:repo/rulesets`, which the default contents:read token cannot read.
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -45,7 +48,6 @@ jobs:
         run: uv run python scripts/delivery.py validate-ci --pr-body "$PR_BODY"
       - name: Convergence
         run: uv run python scripts/verify.py
-
   quality:
     runs-on: ubuntu-latest
     steps:

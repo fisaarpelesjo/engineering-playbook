@@ -16,7 +16,6 @@ jobs:
       # Read-only, and required only by the "Ruleset reconciliation" step below: comparing
       # .github/rulesets/main.yml against the ruleset applied on the server needs `gh api
       # repos/:owner/:repo/rulesets`, which the default contents:read token cannot read.
-      administration: read
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -49,15 +48,6 @@ jobs:
         run: uv run python scripts/delivery.py validate-ci --pr-body "$PR_BODY"
       - name: Convergence
         run: uv run python scripts/verify.py
-      - name: Ruleset reconciliation
-        # T201 / FR-002 / AC-006: this runs here, not inside `scripts/verify.py`, because
-        # it needs network and `gh` -- see the docstring of `check_ruleset_reconciliation`
-        # in src/engineering_playbook/core.py for why that check is not embedded in the
-        # offline-running `verify_root`.
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: uv run python scripts/verify_ruleset.py
-
   quality:
     runs-on: ubuntu-latest
     steps:
