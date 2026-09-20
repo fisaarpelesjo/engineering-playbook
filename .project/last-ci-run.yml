@@ -2,15 +2,15 @@
 # Diz contra QUE COMMIT esta corrida rodou -- um verde aqui nao vale para outro HEAD.
 schema_version: 1
 kind: local_ci_receipt
-ran_at: '2026-09-20T01:59:52Z'
-head: 'cef4af990037fdceb6a32d41d17a5bfa8eef5955'
-head_before_run: 'cef4af990037fdceb6a32d41d17a5bfa8eef5955'
+ran_at: '2026-09-20T19:29:34Z'
+head: '19cbec2cbbbca3b310c65dba4dcae7e18d1a9c36'
+head_before_run: '19cbec2cbbbca3b310c65dba4dcae7e18d1a9c36'
 tree_was_dirty_before_run: true
 tree_changed_during_run: false
 tree_was_dirty: true
-dirty_paths: 34
-red: 1
-partial: 0
+dirty_paths: 3
+red: 0
+partial: 1
 green: 0
 affected_mode: false
 dry_run: false
