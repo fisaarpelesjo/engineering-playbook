@@ -1,5 +1,5 @@
 schema_version: 1.0.0
-updated_at: '2026-09-20T19:47:24Z'
+updated_at: '2026-09-20T19:47:27Z'
 active_workstream: WS-001
 current_branch: fix/006-reconcile-ruleset-and-activate-hooks
 issue: 25
@@ -9,7 +9,7 @@ active_specification: specs/001-engineering-playbook/spec.md
 active_plan: specs/001-engineering-playbook/plan.md
 active_tasks: specs/001-engineering-playbook/tasks.md
 active_task: T017
-last_checkpoint: .project/checkpoints/CP-20260920-027.yml
+last_checkpoint: .project/checkpoints/CP-20260920-028.yml
 last_verified_commit: b12d62b41cf51ecb545a9e755b6e96e5ed8800d8
 validation:
   passed:
@@ -37,4 +37,4 @@ delivery:
   remote: origin
   pr_number: 29
   pr_url: https://github.com/fisaarpelesjo/engineering-playbook/pull/29
-  updated_at: '2026-09-20T19:36:39Z'
+  updated_at: '2026-09-20T19:48:29Z'

@@ -334,11 +334,19 @@ def delivery_state(
     }
 
 
-def pr_body(title: str, files: list[str]) -> str:
+def pr_body(title: str, files: list[str], issue: int | None = None) -> str:
+    """Build the pull request body, including the closing keyword when a card exists.
+
+    The closing line has to originate here. `publish` rewrites the body from this
+    file on every run, so a `Closes #N` added by hand afterwards is erased on the
+    next publish and the CI gate then refuses the pull request -- measured on run
+    35533507737, where exactly that happened.
+    """
+    closes = f"\n\nCloses #{issue}" if issue is not None else ""
     file_lines = "\n".join(f"- `{path}`" for path in files) or "- No changed files detected."
     return f"""## Summary
 
-{title}
+{title}{closes}
 
 ## Problem and motivation
 
@@ -433,7 +441,8 @@ def command_prepare(args: argparse.Namespace) -> int:
             f"ERROR: git nao respondeu, portanto os arquivos alterados nao foram medidos: {failure}"
         )
         return 1
-    body = pr_body(title, files)
+    declared_issue = load_yaml(args.root / ".project/state.yml").get("issue")
+    body = pr_body(title, files, declared_issue if isinstance(declared_issue, int) else None)
     write_yaml_atomic(args.root / PREPARE_FILE, delivery_state(args.root, title, body, files))
     (args.root / PR_BODY_FILE).write_text(body, encoding="utf-8", newline="\n")
     run(args.root, ["uv", "run", "python", "scripts/checkpoint.py"])
