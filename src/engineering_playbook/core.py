@@ -526,8 +526,22 @@ def check_ruleset_reconciliation(
         applied_params = applied_rules.get(rule_type)
         if applied_params is None:
             continue
+        # The file states intent; the API answers with intent plus every server
+        # default, and that set grows as GitHub adds fields. Measured on the
+        # first real run: the API returned `required_reviewers`,
+        # `require_extra_approval_for_unattributed_changes` and
+        # `do_not_enforce_on_create`, none of which the file declares. Demanding
+        # equality would make this control red for a reason nobody here chose.
+        #
+        # DECLARED LIMIT: only the parameters the file names are compared. A
+        # server-side change to a parameter the file stays silent about passes
+        # unnoticed. Naming a parameter in the file is what places it under this
+        # control.
+        compared_applied = {
+            key: value for key, value in applied_params.items() if key in declared_params
+        }
         result.add(
-            declared_params == applied_params,
+            declared_params == compared_applied,
             f"Ruleset rule '{rule_type}' parameters diverge: file={declared_params} "
             f"applied={applied_params}",
         )

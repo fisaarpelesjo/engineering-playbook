@@ -136,6 +136,41 @@ def test_reconciliation_accepts_a_file_that_matches_the_applied_ruleset(
     assert result.ok, f"a reconciled file was rejected: {result.errors}"
 
 
+def test_server_defaults_absent_from_the_file_are_not_treated_as_divergence(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Measured on the first real run against GitHub, not hypothesised.
+
+    The API answers with intent plus server defaults, and that set grows as
+    GitHub adds fields. Demanding equality made this control red over
+    `required_reviewers`, `require_extra_approval_for_unattributed_changes` and
+    `do_not_enforce_on_create` -- none of which anyone here chose. Only the
+    parameters the file names are compared, and a parameter the file stays
+    silent about is therefore outside this control by construction.
+    """
+    _write_ruleset(tmp_path, RECONCILED_FILE)
+    applied_with_defaults: dict[str, Any] = json.loads(json.dumps(APPLIED_RULESET))
+    for rule in applied_with_defaults["rules"]:
+        if rule["type"] == "pull_request":
+            rule["parameters"]["required_reviewers"] = []
+            rule["parameters"]["require_extra_approval_for_unattributed_changes"] = True
+        if rule["type"] == "required_status_checks":
+            rule["parameters"]["do_not_enforce_on_create"] = False
+    responses = {
+        "api repos/:owner/:repo/rulesets": json.dumps(
+            [{"id": applied_with_defaults["id"], "name": applied_with_defaults["name"]}]
+        ),
+        f"api repos/:owner/:repo/rulesets/{applied_with_defaults['id']}": json.dumps(
+            applied_with_defaults
+        ),
+    }
+    monkeypatch.setattr(core, "gh_capture", _fake_gh_capture(responses))
+
+    result = check_ruleset_reconciliation(tmp_path)
+
+    assert result.ok, f"server defaults were read as divergence: {result.errors}"
+
+
 # --- adversarial: NFR-002, absence of measurement must never read as a pass -----------------
 
 
