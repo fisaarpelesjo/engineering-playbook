@@ -3,7 +3,6 @@ description: "Manifest of files installed into derived projects."
 include:
   files:
     - ".gitignore"
-    - ".pre-commit-config.yaml"
     - "AGENTS.md"
     - "CHANGELOG.md"
     - "CLAUDE.md"

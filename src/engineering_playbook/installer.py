@@ -6,6 +6,7 @@ import os
 import re
 import shutil
 import stat
+import subprocess
 from dataclasses import dataclass
 from importlib import resources
 from pathlib import Path
@@ -13,6 +14,8 @@ from typing import Any, cast
 
 from . import __version__
 from .core import load_yaml, utc_now, write_yaml_atomic
+
+HOOKS_PATH = "scripts/git-hooks"
 
 LOCK_FILE = ".project/playbook.lock.yml"
 PROJECT_FILE = ".project/project.yml"
@@ -176,6 +179,39 @@ def mark_executable_if_script(path: Path, data: bytes) -> None:
 
 def atomic_write_text(path: Path, text: str) -> None:
     atomic_write_bytes(path, text.encode("utf-8"))
+
+
+def configure_hooks_path(root: Path) -> None:
+    """Point `core.hooksPath` at this template's hooks, once per clone (FR-003).
+
+    This is the mechanism side of `verify_root`'s check in `core.py`: that check fails
+    `doctor`/`verify` when the value does not match, and this function is what is supposed
+    to make it match, called from every real bootstrap entry point (`apply_init`,
+    `command_update`, `legacy_bootstrap`).
+
+    Best-effort, on purpose: a target that is not (yet) a git repository, or one that never
+    received `scripts/git-hooks` (e.g. `ci=none`, a dry run, a fresh directory before `git
+    init`), has nothing to configure, and that absence is not this function's failure to
+    report -- `doctor`/`verify` are what report it, against the real repository state.
+
+    Known bypass vectors, written on purpose (FR-009), matching `scripts/git-hooks/pre-commit`:
+      1. A developer can run `git config --unset core.hooksPath` or point it elsewhere right
+         after this runs; nothing here runs continuously, only once, here.
+      2. `git commit --no-verify` / `git push --no-verify` skip the hooks regardless of
+         whether `core.hooksPath` is configured correctly.
+      3. If `git config` itself fails (e.g. read-only `.git/config`), this function does not
+         raise -- the caller's install/update still completes, and `doctor`/`verify` are what
+         surface the resulting non-configuration on the next run.
+    """
+    if not (root / ".git").exists() or not (root / HOOKS_PATH).is_dir():
+        return
+    subprocess.run(
+        ["git", "config", "core.hooksPath", HOOKS_PATH],
+        cwd=root,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
 
 
 def iter_resource_files(directory: str) -> list[str]:
@@ -477,6 +513,7 @@ def apply_init(plan: InstallPlan, *, dry_run: bool, source: str) -> int:
     lock_path = ensure_safe_child(plan.root, LOCK_FILE)
     if not lock_path.exists():
         write_yaml_atomic(lock_path, build_lock(plan, source))
+    configure_hooks_path(plan.root)
     print(f"Installed engineering-playbook into {plan.root}")
     return 0
 
@@ -555,11 +592,13 @@ def command_update(args: argparse.Namespace) -> int:
             {"id": f"update-{__version__}", "applied_at": utc_now(), "files": sorted(checksums)}
         )
         write_yaml_atomic(lock_path, lock)
+    configure_hooks_path(root)
     print("Update complete.")
     return 0
 
 
 def legacy_bootstrap(args: argparse.Namespace) -> int:
+    configure_hooks_path(args.root)
     if args.target:
         init_args = argparse.Namespace(
             path=args.target,

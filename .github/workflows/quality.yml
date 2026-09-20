@@ -13,6 +13,9 @@ jobs:
     permissions:
       contents: read
       issues: read
+      # Read-only, and required only by the "Ruleset reconciliation" step below: comparing
+      # .github/rulesets/main.yml against the ruleset applied on the server needs `gh api
+      # repos/:owner/:repo/rulesets`, which the default contents:read token cannot read.
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -39,13 +42,20 @@ jobs:
         run: uv run python scripts/delivery.py validate-ci --pr-title "$PR_TITLE"
       - name: Closes issue
         if: github.event_name == 'pull_request'
+        # The body is read live rather than from the event payload. `publish`
+        # pushes the branch and only then writes the body, so the run triggered
+        # by that push carries the body as it was BEFORE the card was written --
+        # measured on run 35533986187, which refused a pull request whose body
+        # already said `Closes #25`. An `edited` event does not retrigger the
+        # workflow, so reading the payload loses the race by construction.
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          PR_BODY: ${{ github.event.pull_request.body }}
-        run: uv run python scripts/delivery.py validate-ci --pr-body "$PR_BODY"
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          PR_BODY="$(gh pr view "$PR_NUMBER" --json body --jq .body)"
+          uv run python scripts/delivery.py validate-ci --pr-body "$PR_BODY"
       - name: Convergence
         run: uv run python scripts/verify.py
-
   quality:
     runs-on: ubuntu-latest
     steps:

@@ -11,7 +11,12 @@ rules:
   - type: non_fast_forward
   - type: pull_request
     parameters:
-      required_approving_review_count: 1
+      # 0, not 1: this repository has a single maintainer, and a maintainer cannot approve
+      # their own pull request (GitHub itself refuses a self-approval). A review count of 1
+      # here would not add a second pair of eyes -- it would make every pull request
+      # permanently unmergeable through the normal path, which is not extra safety, it is a
+      # dead end. Measured on the applied ruleset, 2026-09-20 (id 23734100).
+      required_approving_review_count: 0
       dismiss_stale_reviews_on_push: true
       require_code_owner_review: false
       require_last_push_approval: false
@@ -24,10 +29,22 @@ rules:
       required_status_checks:
         - context: delivery-policy
         - context: quality
+# No bypass actor is granted. `current_user_can_bypass` reads `never` on the applied
+# ruleset -- the owner's decision, kept without exception (see plan.md's Risks section: a
+# blocked required check has no recovery path except editing this ruleset).
+bypass_actors: []
 settings:
   allow_auto_merge: true
   delete_branch_on_merge: true
 notes:
-  - "Declarative proposal only. Do not apply remotely without explicit authorization."
-  - "Apply with GitHub API or gh after reviewing repository-specific check names."
+  - "This file represents the ruleset APPLIED on the server since 2026-09-20 (id 23734100),
+    not a proposal. FR-002/AC-006: scripts/verify_ruleset.py (CI job delivery-policy, step
+    'Ruleset reconciliation') compares this file against `gh api repos/:owner/:repo/rulesets`
+    on every push/PR and fails the check on divergence."
+  - "Known bypass vectors, written on purpose (FR-009): editing this file without also
+    editing the server ruleset is caught by the reconciliation check above, on the next CI
+    run. Editing the server ruleset directly, without a pull request touching this file, is
+    caught the same way, but only once some later pull request runs CI -- there is no
+    push-time trigger on ruleset changes themselves. Running the reconciliation check on a
+    machine without `gh` authenticated raises rather than passing silently (NFR-002)."
 

@@ -30,7 +30,6 @@ BASE_REQUIRED_FILES = [
     "THIRD_PARTY_NOTICES.md",
     "pyproject.toml",
     "uv.lock",
-    ".pre-commit-config.yaml",
     ".gitignore",
     ".github/copilot-instructions.md",
     ".github/pull_request_template.md",
@@ -341,6 +340,25 @@ def git_ref_exists(root: Path, ref: str) -> bool:
     )
 
 
+def git_config_get(root: Path, key: str) -> str | None:
+    """The value of a git config key, or None when it is simply unset.
+
+    `git config --get` exits 1 with empty stdout exactly when the key does not exist -- a
+    legitimate answer, not a failure of git itself, the same distinction `git_ref_exists`
+    already draws for refs. Any other non-zero exit (not a repository, unreadable config)
+    is a real failure and raises GitUnavailableError instead of being folded into None.
+    """
+    completed = _run_git(root, "config", "--get", key)
+    if completed.returncode == 0:
+        return completed.stdout.strip()
+    if completed.returncode == 1:
+        return None
+    raise GitUnavailableError(
+        f"git config --get {key} saiu com {completed.returncode}: "
+        f"{completed.stderr.strip() or 'sem stderr'}"
+    )
+
+
 def git_branch(root: Path) -> str:
     """The current branch name.
 
@@ -381,6 +399,160 @@ def git_parents(root: Path) -> list[str]:
 def git_status(root: Path) -> list[str]:
     output = git_capture(root, "status", "--short")
     return [line for line in output.splitlines() if line.strip()]
+
+
+class GhUnavailableError(RuntimeError):
+    """`gh` could not answer: network absent, not authenticated, or missing entirely.
+
+    NFR-002: a control that cannot obtain its measurement returns failure, never a silent
+    pass. Every caller of `fetch_applied_ruleset`/`check_ruleset_reconciliation` is required
+    to let this propagate into a non-zero exit rather than swallow it into "OK".
+    """
+
+
+def _run_gh(root: Path, *args: str) -> subprocess.CompletedProcess[str]:
+    try:
+        return subprocess.run(
+            ["gh", *args],
+            cwd=root,
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+    except OSError as failure:  # gh off PATH, or not executable
+        raise GhUnavailableError(f"gh {' '.join(args)} nao pode ser executado: {failure}") from None
+
+
+def gh_capture(root: Path, *args: str) -> str:
+    """Run `gh` and return stdout. Raises GhUnavailableError on any non-zero exit.
+
+    Mirrors `git_capture`'s contract on purpose: a `gh` that cannot answer (no network, no
+    `gh auth login`/`GH_TOKEN`, rate-limited, `gh` off PATH) must never be read as "nothing to
+    report" -- that would turn an unmeasured control green, which NFR-002 forbids.
+    """
+    completed = _run_gh(root, *args)
+    if completed.returncode != 0:
+        raise GhUnavailableError(
+            f"gh {' '.join(args)} saiu com {completed.returncode}: "
+            f"{completed.stderr.strip() or 'sem stderr'}"
+        )
+    return completed.stdout.strip()
+
+
+def fetch_applied_ruleset(root: Path, *, ruleset_name: str = "protect-main") -> dict[str, Any]:
+    """The branch ruleset actually applied on the server, read through `gh api`.
+
+    Two calls, not one: `repos/:owner/:repo/rulesets` lists rulesets by id and name only, and
+    the detail (`rules`, `bypass_actors`, `enforcement`) lives at
+    `repos/:owner/:repo/rulesets/{id}`. `gh`'s `:owner/:repo` shorthand resolves from the
+    repository whose remote `origin` this `root` is checked out from -- no owner/repo is
+    hardcoded here.
+
+    Raises GhUnavailableError when the measurement cannot be obtained, or when no ruleset
+    named `ruleset_name` exists on the server (an absent ruleset is not "nothing to compare
+    against"; FR-001 requires server-side protection to exist at all).
+    """
+    rulesets = cast(
+        list[dict[str, Any]],
+        json.loads(gh_capture(root, "api", "repos/:owner/:repo/rulesets")),
+    )
+    matches = [item for item in rulesets if item.get("name") == ruleset_name]
+    if not matches:
+        raise GhUnavailableError(
+            f"nenhum ruleset '{ruleset_name}' foi encontrado em repos/:owner/:repo/rulesets"
+        )
+    ruleset_id = matches[0]["id"]
+    detail = json.loads(gh_capture(root, "api", f"repos/:owner/:repo/rulesets/{ruleset_id}"))
+    return cast(dict[str, Any], detail)
+
+
+def check_ruleset_reconciliation(
+    root: Path, *, ruleset_path: str = ".github/rulesets/main.yml"
+) -> CheckResult:
+    """Compare the versioned ruleset file against the ruleset applied on the server (FR-002,
+    AC-006). T201's control.
+
+    WHERE THIS RUNS, AND WHY, WRITTEN DOWN ON PURPOSE:
+
+    This is deliberately NOT wired into `verify_root`, even though `verify_root` backs both
+    `doctor` and `verify`. Those two run locally, frequently, and offline: `resume` and
+    `checkpoint` call `verify_root` on every invocation, including on a laptop with no
+    network at all. Embedding a `gh api` call there would mean NFR-002's "no measurement is
+    failure, never a pass" turns every offline `resume`/`checkpoint`/`doctor` red for a
+    reason that has nothing to do with the working tree -- a cost imposed on every offline
+    developer, permanently, to catch a divergence that can only be introduced by editing
+    files or the server configuration, both already reviewed at pull-request time.
+
+    Instead this runs as a distinct, named CI step (`.github/workflows/quality.yml`, job
+    `delivery-policy`, step "Ruleset reconciliation"), which always has network and a
+    `GH_TOKEN`. `scripts/verify_ruleset.py` and the `verify-ruleset` CLI subcommand exist so a
+    contributor can still run the exact same check locally, on demand, when they do have
+    `gh` authenticated -- but nothing calls it for them implicitly.
+
+    Known bypass vectors, written on purpose (FR-009):
+      1. Editing the server ruleset directly, without a pull request: the next PR's CI run
+         is what surfaces the resulting divergence, not something watching continuously.
+      2. Running this outside CI, on a machine without `gh auth`: `GhUnavailableError`
+         propagates and `command_verify_ruleset` returns 1 -- NFR-002, never a silent pass.
+      3. This compares `rules` (type + parameters) and `bypass_actors`. It does NOT compare
+         the `settings:` block in the file (`allow_auto_merge`, `delete_branch_on_merge`):
+         those are repository settings, not part of the ruleset object the API returns for
+         this endpoint, and comparing them would need a second, different endpoint. That gap
+         is declared here rather than silently claimed as covered.
+    """
+    result = CheckResult(errors=[], warnings=[])
+    declared_text = (root / ruleset_path).read_text(encoding="utf-8")
+    declared = yaml.safe_load(declared_text)
+    applied = fetch_applied_ruleset(root, ruleset_name=str(declared.get("name", "protect-main")))
+
+    result.add(
+        applied.get("enforcement") == declared.get("enforcement"),
+        f"Ruleset enforcement diverges: file={declared.get('enforcement')!r} "
+        f"applied={applied.get('enforcement')!r}",
+    )
+
+    declared_rules = {
+        cast(str, rule["type"]): rule.get("parameters", {}) for rule in declared.get("rules", [])
+    }
+    applied_rules = {
+        cast(str, rule["type"]): rule.get("parameters", {}) for rule in applied.get("rules", [])
+    }
+    result.add(
+        set(declared_rules) <= set(applied_rules),
+        f"Ruleset file declares rule types absent from the applied ruleset: "
+        f"{sorted(set(declared_rules) - set(applied_rules))}",
+    )
+    for rule_type, declared_params in declared_rules.items():
+        applied_params = applied_rules.get(rule_type)
+        if applied_params is None:
+            continue
+        # The file states intent; the API answers with intent plus every server
+        # default, and that set grows as GitHub adds fields. Measured on the
+        # first real run: the API returned `required_reviewers`,
+        # `require_extra_approval_for_unattributed_changes` and
+        # `do_not_enforce_on_create`, none of which the file declares. Demanding
+        # equality would make this control red for a reason nobody here chose.
+        #
+        # DECLARED LIMIT: only the parameters the file names are compared. A
+        # server-side change to a parameter the file stays silent about passes
+        # unnoticed. Naming a parameter in the file is what places it under this
+        # control.
+        compared_applied = {
+            key: value for key, value in applied_params.items() if key in declared_params
+        }
+        result.add(
+            declared_params == compared_applied,
+            f"Ruleset rule '{rule_type}' parameters diverge: file={declared_params} "
+            f"applied={applied_params}",
+        )
+
+    declared_bypass = declared.get("bypass_actors", [])
+    applied_bypass = applied.get("bypass_actors", [])
+    result.add(
+        declared_bypass == applied_bypass,
+        f"Ruleset bypass_actors diverge: file={declared_bypass} applied={applied_bypass}",
+    )
+    return result
 
 
 def utc_now() -> str:
@@ -800,6 +972,65 @@ def verify_root(root: Path) -> CheckResult:
             "- squash",
         ]:
             result.add(required in ruleset_text, f"Ruleset missing required policy: {required}")
+
+    # FR-003 / AC-002: client hooks are not a control until `core.hooksPath` actually points
+    # at them. This only applies to a real git working tree that ships this template's hooks
+    # (guarded on both below) -- a directory that is not a git repository at all, or a repo
+    # that never received `scripts/git-hooks` (e.g. a bare fixture in a unit test), has
+    # nothing to activate and is not a case this check speaks to.
+    #
+    # Known bypass vectors, written on purpose (FR-009), matching the header of
+    # `scripts/git-hooks/pre-commit` itself:
+    #   1. `git config core.hooksPath` can be unset or repointed after this check last ran;
+    #      nothing here runs continuously, only on the next `doctor`/`verify` invocation.
+    #   2. `git commit --no-verify` / `git push --no-verify` skip the hooks even while
+    #      `core.hooksPath` is correctly configured; this check cannot see that at all,
+    #      because it inspects configuration, not individual invocations.
+    #   3. This check runs locally, on the machine that happens to run `doctor`/`verify`;
+    #      per FR-012 it has no effect on a clone where nobody ever runs those commands.
+    #   4. A continuous integration runner checks out the repository and never configures
+    #      client hooks, because it has no commits of its own to guard. Measured on run
+    #      35532861087, where this check turned every job red for a condition that is
+    #      meaningless there. It is therefore skipped when the environment declares itself
+    #      to be CI, and the cost of that skip is stated plainly: a CI run cannot testify
+    #      about the hooks on the workstation that produced the commit.
+    hooks_dir = root / "scripts" / "git-hooks"
+    running_in_ci = bool(os.environ.get("CI") or os.environ.get("GITHUB_ACTIONS"))
+    if (root / ".git").exists() and hooks_dir.is_dir() and not running_in_ci:
+        expected_hooks_path = "scripts/git-hooks"
+        normalized = ""
+        try:
+            configured_hooks_path = git_config_get(root, "core.hooksPath")
+        except GitUnavailableError as failure:
+            result.errors.append(
+                f"git nao respondeu, portanto core.hooksPath nao foi medido: {failure}"
+            )
+        else:
+            normalized = (configured_hooks_path or "").replace("\\", "/").rstrip("/")
+            result.add(
+                normalized == expected_hooks_path,
+                "Client git hooks are not active: core.hooksPath is "
+                f"{configured_hooks_path!r}, expected {expected_hooks_path!r}. Run "
+                "`engineering-playbook init` or `update`, or "
+                f"`git config core.hooksPath {expected_hooks_path}` directly.",
+            )
+
+        # FR-004: the raw hook above and the `pre-commit` framework are incompatible by
+        # design -- the framework refuses to install once `core.hooksPath` is set
+        # (https://github.com/pre-commit/pre-commit/issues/3630). The decision recorded in
+        # `docs/decisions/` removed `.pre-commit-config.yaml` in favor of the raw hooks; this
+        # guards against silent reintroduction of the file this decision removed, active at
+        # the same time as the raw hooks it conflicts with. Known bypass vector: a
+        # `.pre-commit-config.yaml` added back while `core.hooksPath` points elsewhere would
+        # not be caught here -- it is the *simultaneous* activation this check watches for.
+        pre_commit_config_active = normalized == expected_hooks_path
+        result.add(
+            not ((root / ".pre-commit-config.yaml").exists() and pre_commit_config_active),
+            "Two incompatible hook mechanisms are active at once: .pre-commit-config.yaml "
+            "exists and core.hooksPath points at scripts/git-hooks. See "
+            "docs/decisions/ for the arbitration; the pre-commit framework refuses to "
+            "install while core.hooksPath is set, so this state should not occur.",
+        )
 
     for tasks_path in sorted(root.glob("specs/*/tasks.md")):
         task_ids = re.findall(r"^- (T[0-9]{3}):", tasks_path.read_text(encoding="utf-8"), re.M)

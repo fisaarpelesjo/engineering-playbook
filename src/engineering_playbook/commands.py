@@ -5,7 +5,9 @@ import shutil
 from pathlib import Path
 
 from .core import (
+    GhUnavailableError,
     GitUnavailableError,
+    check_ruleset_reconciliation,
     git_branch,
     git_head,
     git_status,
@@ -21,6 +23,21 @@ from .receipt import CiReceiptStatus, battery_claims, check_ci_receipt
 
 def command_verify(root: Path) -> int:
     return print_result(verify_root(root))
+
+
+def command_verify_ruleset(root: Path) -> int:
+    """T201's CI-only control: compare `.github/rulesets/main.yml` against the server.
+
+    Not part of `command_verify`/`verify_root` -- see the docstring of
+    `check_ruleset_reconciliation` for why the local/offline path (`doctor`, `verify`,
+    `resume`, `checkpoint`) stays unaffected by a network-dependent check.
+    """
+    try:
+        result = check_ruleset_reconciliation(root)
+    except GhUnavailableError as failure:
+        print(f"ERROR: gh nao respondeu, portanto o ruleset aplicado nao foi medido: {failure}")
+        return 1
+    return print_result(result)
 
 
 def command_doctor(root: Path) -> int:
