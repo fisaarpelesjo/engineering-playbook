@@ -17,9 +17,13 @@ import sys
 import time
 from collections import deque
 from pathlib import Path
+from typing import Any, cast
 
 if os.name == "nt":
-    os.system("")
+    # Soft-deprecated in favor of subprocess, but this is the documented way
+    # to turn on ANSI/VT100 escapes in a legacy Windows console; a real
+    # subprocess call here would be a redesign, not a typing fix.
+    os.system("")  # pyright: ignore[reportDeprecated]
 # sys.stdout is a plain TextIO to a type checker, so reach for reconfigure
 # defensively: it exists on CPython's TextIOWrapper and is what makes the
 # box-drawing characters survive a cp1252 console.
@@ -32,15 +36,41 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import subagent_feed as feed_mod  # noqa: E402
 
 try:
-    from rich.console import Console, Group  # pyright: ignore[reportMissingImports]
-    from rich.live import Live  # pyright: ignore[reportMissingImports]
-    from rich.panel import Panel  # pyright: ignore[reportMissingImports]
-    from rich.table import Table  # pyright: ignore[reportMissingImports]
-    from rich.text import Text  # pyright: ignore[reportMissingImports]
+    # rich has no bundled types and is optional at runtime (see except
+    # below), so pyright cannot resolve or type these; the aliases are
+    # recast right after the block instead of ignoring every call site.
+    from rich.console import (  # pyright: ignore[reportMissingImports]
+        Console as _Console,  # pyright: ignore[reportUnknownVariableType]
+    )
+    from rich.console import (  # pyright: ignore[reportMissingImports]
+        Group as _Group,  # pyright: ignore[reportUnknownVariableType]
+    )
+    from rich.live import (  # pyright: ignore[reportMissingImports]
+        Live as _Live,  # pyright: ignore[reportUnknownVariableType]
+    )
+    from rich.panel import (  # pyright: ignore[reportMissingImports]
+        Panel as _Panel,  # pyright: ignore[reportUnknownVariableType]
+    )
+    from rich.table import (  # pyright: ignore[reportMissingImports]
+        Table as _Table,  # pyright: ignore[reportUnknownVariableType]
+    )
+    from rich.text import (  # pyright: ignore[reportMissingImports]
+        Text as _Text,  # pyright: ignore[reportUnknownVariableType]
+    )
 except ImportError:
     sys.exit("falta o pacote rich:  python -m pip install rich")
 
-STYLE = {
+# rich is optional at runtime (see except above) and ships no type stubs, so
+# pyright cannot know its real shapes. Cast once here rather than leaving
+# every call site as Unknown or scattering a type: ignore per line.
+Console = cast("type[Any]", _Console)
+Group = cast("type[Any]", _Group)
+Live = cast("type[Any]", _Live)
+Panel = cast("type[Any]", _Panel)
+Table = cast("type[Any]", _Table)
+Text = cast("type[Any]", _Text)
+
+STYLE: dict[feed_mod.Kind, str] = {
     "tool": "bold blue",
     "res": "dim",
     "err": "bold red",
@@ -49,7 +79,7 @@ STYLE = {
     "prompt": "green",
     "raw": "dim",
 }
-STATUS_STYLE = {"ativo": "bold green", "parado": "yellow", "fim": "dim"}
+STATUS_STYLE: dict[str, str] = {"ativo": "bold green", "parado": "yellow", "fim": "dim"}
 MIN_PANEL_W = 34
 MIN_PANEL_H = 7
 
@@ -57,17 +87,17 @@ MIN_PANEL_H = 7
 class Box:
     """One agent's scrollback."""
 
-    def __init__(self, tail, maxlen=400):
+    def __init__(self, tail: feed_mod.AgentTail, maxlen: int = 400) -> None:
         self.tail = tail
-        self.lines = deque(maxlen=maxlen)
+        self.lines: deque[feed_mod.Event] = deque(maxlen=maxlen)
 
-    def add(self, events, show_thinking):
+    def add(self, events: list[feed_mod.Event], show_thinking: bool) -> None:
         for kind, text in events:
             if kind == "think" and not show_thinking:
                 continue
             self.lines.append((kind, text))
 
-    def render(self, width, height):
+    def render(self, width: int, height: int) -> Any:
         t = self.tail
         status = t.status()
         head = Text()
@@ -104,7 +134,7 @@ class Box:
         )
 
 
-def human(seconds):
+def human(seconds: float) -> str:
     """1476346.7 -> '17d'; keeps the footer readable for stale agents."""
     if seconds < 60:
         return f"{seconds:.1f}s"
@@ -115,9 +145,11 @@ def human(seconds):
     return f"{seconds // 86400:.0f}d"
 
 
-def visible_boxes(boxes, keep_seconds, only_active=False):
+def visible_boxes(
+    boxes: dict[str, Box], keep_seconds: float, only_active: bool = False
+) -> list[Box]:
     """Live agents first; finished ones drop off after keep_seconds."""
-    alive = []
+    alive: list[Box] = []
     for b in boxes.values():
         status = b.tail.status()
         if only_active and status != "ativo":
@@ -129,7 +161,13 @@ def visible_boxes(boxes, keep_seconds, only_active=False):
     return alive
 
 
-def grid(boxes, console, keep_seconds, project_name, only_active=False):
+def grid(
+    boxes: dict[str, Box],
+    console: Any,
+    keep_seconds: float,
+    project_name: str,
+    only_active: bool = False,
+) -> Any:
     width = console.width
     height = console.height
     shown = visible_boxes(boxes, keep_seconds, only_active)
@@ -173,7 +211,7 @@ def grid(boxes, console, keep_seconds, project_name, only_active=False):
     return Group(table, foot)
 
 
-def main():
+def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--project", help="substring of the project slug")
     ap.add_argument("--all", action="store_true", dest="all_sessions")
@@ -204,7 +242,7 @@ def main():
     if project is None:
         sys.exit("nenhum projeto em ~/.claude/projects")
 
-    size = None
+    size: tuple[int, int] | None = None
     if args.size:
         try:
             w, h = args.size.lower().split("x")
@@ -216,9 +254,9 @@ def main():
         feed_mod.GLYPHS = feed_mod.GLYPHS_ASCII
 
     feed = feed_mod.Feed(project, args.all_sessions, args.from_start)
-    boxes = {}
+    boxes: dict[str, Box] = {}
 
-    def tick():
+    def tick() -> Any:
         for tail in feed.discover():
             boxes[tail.id] = Box(tail)
         width = max(20, console.width // max(1, min(len(boxes) or 1, console.width // MIN_PANEL_W)))

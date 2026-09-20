@@ -15,11 +15,27 @@ every unknown shape degrades to a ("raw", preview) event instead of raising.
 import json
 import re
 import time
+from collections.abc import Iterator
 from pathlib import Path
+from typing import Literal, cast
 
-SKIP_TYPES = {"attachment", "system", "summary"}
-GLYPHS = {"tool": "→", "res": "←", "err": "✗", "text": "●", "think": "~", "prompt": "▶", "raw": "?"}
-GLYPHS_ASCII = {
+# One transcript line, parsed from JSON, before we know its actual shape.
+JSONObj = dict[str, object]
+
+Kind = Literal["tool", "res", "err", "text", "think", "prompt", "raw"]
+Event = tuple[Kind, str]
+
+SKIP_TYPES: set[str] = {"attachment", "system", "summary"}
+GLYPHS: dict[Kind, str] = {
+    "tool": "→",
+    "res": "←",
+    "err": "✗",
+    "text": "●",
+    "think": "~",
+    "prompt": "▶",
+    "raw": "?",
+}
+GLYPHS_ASCII: dict[Kind, str] = {
     "tool": ">",
     "res": "<",
     "err": "x",
@@ -30,15 +46,30 @@ GLYPHS_ASCII = {
 }
 
 
-def slug_for(path):
+def _as_json_obj(value: object) -> JSONObj | None:
+    """Narrow an untyped JSON value to an object, or None if it isn't one."""
+    return cast(JSONObj, value) if isinstance(value, dict) else None
+
+
+def _as_json_list(value: object) -> list[object] | None:
+    """Narrow an untyped JSON value to an array, or None if it isn't one."""
+    return cast(list[object], value) if isinstance(value, list) else None
+
+
+def _str(value: object, default: str = "") -> str:
+    """Narrow an untyped JSON value to str, or fall back to `default`."""
+    return value if isinstance(value, str) else default
+
+
+def slug_for(path: Path | str) -> str:
     return re.sub(r"[^A-Za-z0-9]", "-", str(path))
 
 
-def projects_root():
+def projects_root() -> Path:
     return Path.home() / ".claude" / "projects"
 
 
-def pick_project(filt=None, cwd=None):
+def pick_project(filt: str | None = None, cwd: Path | str | None = None) -> Path | None:
     """Project dir: matching `filt`, else the one for `cwd`, else newest."""
     root = projects_root()
     if not root.is_dir():
@@ -54,80 +85,89 @@ def pick_project(filt=None, cwd=None):
     return max(cands, key=lambda p: p.stat().st_mtime)
 
 
-def session_dirs(project, all_sessions=False):
+def session_dirs(project: Path, all_sessions: bool = False) -> list[Path]:
     ds = [d for d in project.iterdir() if d.is_dir() and (d / "subagents").is_dir()]
     ds.sort(key=lambda d: (d / "subagents").stat().st_mtime, reverse=True)
     return ds if all_sessions else ds[:1]
 
 
-def agent_files(project, all_sessions=False):
+def agent_files(project: Path, all_sessions: bool = False) -> Iterator[Path]:
     for sess in session_dirs(project, all_sessions):
         yield from sorted((sess / "subagents").glob("agent-*.jsonl"))
 
 
-def read_meta(jsonl_path):
+def read_meta(jsonl_path: Path) -> JSONObj:
     mp = jsonl_path.parent / (jsonl_path.stem + ".meta.json")
     try:
-        return json.loads(mp.read_text(encoding="utf-8"))
+        data: object = json.loads(mp.read_text(encoding="utf-8"))
     except Exception:
         return {}
+    return _as_json_obj(data) or {}
 
 
-def short(s, n, ellipsis="…"):
+def short(s: object, n: int, ellipsis: str = "…") -> str:
     s = " ".join(str(s).split())
     if n <= 1:
         return s[:n]
     return s if len(s) <= n else s[: n - 1] + ellipsis
 
 
-def tool_line(block, width):
-    name = block.get("name", "?")
-    inp = block.get("input")
-    if not isinstance(inp, dict):
+def tool_line(block: JSONObj, width: int) -> str:
+    name = _str(block.get("name"), "?")
+    inp = _as_json_obj(block.get("input"))
+    if inp is None:
         return name
     for key in ("command", "file_path", "pattern", "path", "query", "url", "prompt", "description"):
-        if inp.get(key):
-            return f"{name}  {short(inp[key], max(width, 8))}"
+        value = inp.get(key)
+        if value:
+            return f"{name}  {short(value, max(width, 8))}"
     return f"{name}  {short(json.dumps(inp, ensure_ascii=False), max(width, 8))}"
 
 
-def events_of(obj, width):
+def events_of(obj: JSONObj, width: int) -> list[Event]:
     """One transcript line -> [(kind, text)]. Never raises on odd shapes."""
     if obj.get("type") in SKIP_TYPES:
         return []
-    msg = obj.get("message") if isinstance(obj.get("message"), dict) else {}
+    msg = _as_json_obj(obj.get("message")) or {}
     content = msg.get("content")
-    out = []
+    out: list[Event] = []
     if isinstance(content, str):
         text = content.strip()
         if text and not obj.get("isMeta"):
             out.append(("prompt", short(text, width)))
-    elif isinstance(content, list):
-        for b in content:
-            if not isinstance(b, dict):
+    else:
+        blocks = _as_json_list(content) or []
+        for raw_block in blocks:
+            block = _as_json_obj(raw_block)
+            if block is None:
                 continue
-            bt = b.get("type")
+            bt = block.get("type")
             if bt == "text":
-                text = (b.get("text") or "").strip()
+                text = _str(block.get("text")).strip()
                 if text:
                     out.append(("text", short(text, width)))
             elif bt == "thinking":
-                text = (b.get("thinking") or "").strip()
+                text = _str(block.get("thinking")).strip()
                 if text:
                     out.append(("think", short(text, width)))
             elif bt == "tool_use":
-                out.append(("tool", tool_line(b, width - 14)))
+                out.append(("tool", tool_line(block, width - 14)))
             elif bt == "tool_result":
-                c = b.get("content")
-                if isinstance(c, list):
-                    c = " ".join(x.get("text", "") for x in c if isinstance(x, dict))
-                out.append(("err" if b.get("is_error") else "res", short(c or "(vazio)", width)))
+                c: object = block.get("content")
+                items = _as_json_list(c)
+                if items is not None:
+                    c = " ".join(_str((_as_json_obj(x) or {}).get("text", "")) for x in items)
+                kind: Kind = "err" if block.get("is_error") else "res"
+                out.append((kind, short(c or "(vazio)", width)))
     return out
 
 
-def parse_line(line, width):
+def parse_line(line: str, width: int) -> list[Event]:
     try:
-        return events_of(json.loads(line), width)
+        obj = _as_json_obj(json.loads(line))
+        if obj is None:
+            raise TypeError("transcript line is not a JSON object")
+        return events_of(obj, width)
     except Exception:
         return [("raw", short(line, width))]
 
@@ -137,12 +177,12 @@ class AgentTail:
 
     HANDBACK = "SubagentHandback"
 
-    def __init__(self, path, from_start=False):
+    def __init__(self, path: Path, from_start: bool = False) -> None:
         self.path = path
         self.id = path.stem.replace("agent-", "")
         meta = read_meta(path)
-        self.type = meta.get("agentType", "?")
-        self.description = meta.get("description", "")
+        self.type: str = _str(meta.get("agentType"), "?")
+        self.description: str = _str(meta.get("description"))
         self.offset = 0
         self.tools = 0
         self.errors = 0
@@ -160,7 +200,7 @@ class AgentTail:
             # file once to learn it is finished.
             self.handed_back = self._ends_with_handback()
 
-    def _ends_with_handback(self, window=32768):
+    def _ends_with_handback(self, window: int = 32768) -> bool:
         try:
             with self.path.open("rb") as fh:
                 fh.seek(max(0, self.offset - window))
@@ -169,7 +209,7 @@ class AgentTail:
             return False
         return self.HANDBACK in chunk
 
-    def poll(self, width):
+    def poll(self, width: int) -> list[Event]:
         """New events since the last poll, as [(kind, text)]."""
         try:
             size = self.path.stat().st_size
@@ -187,7 +227,7 @@ class AgentTail:
         except OSError:
             return []
         self.last_write = time.time()
-        events = []
+        events: list[Event] = []
         for line in chunk.splitlines():
             line = line.strip()
             if not line:
@@ -203,10 +243,10 @@ class AgentTail:
         return events
 
     @property
-    def idle_for(self):
+    def idle_for(self) -> float:
         return time.time() - self.last_write
 
-    def status(self, idle_after=90):
+    def status(self, idle_after: int = 90) -> str:
         if self.handed_back:
             return "fim"
         return "ativo" if self.idle_for < idle_after else "parado"
@@ -215,15 +255,15 @@ class AgentTail:
 class Feed:
     """Every agent transcript of a project, discovered as it appears."""
 
-    def __init__(self, project, all_sessions=False, from_start=False):
+    def __init__(self, project: Path, all_sessions: bool = False, from_start: bool = False) -> None:
         self.project = project
         self.all_sessions = all_sessions
         self.from_start = from_start
-        self.agents = {}  # id -> AgentTail, insertion-ordered
+        self.agents: dict[str, AgentTail] = {}  # id -> AgentTail, insertion-ordered
 
-    def discover(self):
+    def discover(self) -> list[AgentTail]:
         """New AgentTails since the last call."""
-        fresh = []
+        fresh: list[AgentTail] = []
         for f in agent_files(self.project, self.all_sessions):
             aid = f.stem.replace("agent-", "")
             if aid not in self.agents:
@@ -232,9 +272,9 @@ class Feed:
                 fresh.append(tail)
         return fresh
 
-    def poll(self, width):
+    def poll(self, width: int) -> list[tuple[AgentTail, list[Event]]]:
         """[(AgentTail, [(kind, text), ...]), ...] for agents that moved."""
-        moved = []
+        moved: list[tuple[AgentTail, list[Event]]] = []
         for tail in self.agents.values():
             evs = tail.poll(width)
             if evs:

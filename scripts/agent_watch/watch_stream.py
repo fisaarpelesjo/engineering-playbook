@@ -17,10 +17,13 @@ import time
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-import subagent_feed as feed_mod  # noqa: E402
+import subagent_feed as feed_mod
 
 if os.name == "nt":
-    os.system("")
+    # Soft-deprecated in favor of subprocess, but this is the documented way
+    # to turn on ANSI/VT100 escapes in a legacy Windows console; a real
+    # subprocess call here would be a redesign, not a typing fix.
+    os.system("")  # pyright: ignore[reportDeprecated]
 # sys.stdout is a plain TextIO to a type checker, so reach for reconfigure
 # defensively: it exists on CPython's TextIOWrapper and is what makes the
 # box-drawing characters survive a cp1252 console.
@@ -30,7 +33,7 @@ if _reconfigure is not None:
         _reconfigure(encoding="utf-8", errors="replace")
 UTF = (getattr(sys.stdout, "encoding", "") or "").lower().startswith("utf")
 
-C = {
+C: dict[str, str] = {
     "dim": "\033[2m",
     "red": "\033[31m",
     "grn": "\033[32m",
@@ -41,8 +44,8 @@ C = {
     "off": "\033[0m",
     "bold": "\033[1m",
 }
-AGENT_COLORS = ["cyn", "mag", "yel", "grn", "blu", "red"]
-KIND_COLOR = {
+AGENT_COLORS: list[str] = ["cyn", "mag", "yel", "grn", "blu", "red"]
+KIND_COLOR: dict[feed_mod.Kind, str] = {
     "tool": "blu",
     "res": "dim",
     "err": "red",
@@ -53,7 +56,7 @@ KIND_COLOR = {
 }
 
 
-def emit(tag, kind, text, glyphs):
+def emit(tag: str, kind: feed_mod.Kind, text: str, glyphs: dict[feed_mod.Kind, str]) -> None:
     colour = C[KIND_COLOR.get(kind, "off")]
     stamp = time.strftime("%H:%M:%S")
     glyph = glyphs.get(kind, "-")
@@ -64,7 +67,7 @@ def emit(tag, kind, text, glyphs):
         print(line.encode("ascii", "replace").decode("ascii"))
 
 
-def main():
+def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--project", help="substring of the project slug")
     ap.add_argument(
@@ -87,7 +90,7 @@ def main():
 
     glyphs = feed_mod.GLYPHS if UTF else feed_mod.GLYPHS_ASCII
     feed = feed_mod.Feed(project, args.all_sessions, args.from_start)
-    colors = {}
+    colors: dict[str, str] = {}
 
     print(
         f"{C['bold']}subagentes{C['off']} {C['dim']}{project.name}{C['off']}  (ctrl+c para sair)\n"
