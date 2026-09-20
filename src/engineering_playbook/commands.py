@@ -11,6 +11,7 @@ from .core import (
     git_branch,
     git_head,
     git_status,
+    git_tree,
     load_yaml,
     next_checkpoint_id,
     print_result,
@@ -111,9 +112,17 @@ def command_reconcile(root: Path, apply: bool = False) -> int:
     findings: list[str] = []
     if state.get("current_branch") != branch:
         findings.append(f"branch mismatch: state={state.get('current_branch')} git={branch}")
-    if state.get("last_verified_commit") not in {None, head}:
+    # The gate in `core.verify_root` reads `last_verified_tree`, not `last_verified_commit`
+    # (issue #30) -- only the tree survives a squash. This staleness check follows the same
+    # field so it never blocks on the commit id that FR-007 makes purely informative.
+    try:
+        head_tree = git_tree(root, head)
+    except GitUnavailableError as failure:
+        print(f"ERROR: git nao respondeu, portanto a tree de HEAD nao foi medida: {failure}")
+        return 1
+    if state.get("last_verified_tree") not in {None, head_tree}:
         findings.append(
-            f"stale verified commit: state={state.get('last_verified_commit')} git={head}"
+            f"stale verified tree: state={state.get('last_verified_tree')} git={head_tree}"
         )
     if not findings:
         print("OK")

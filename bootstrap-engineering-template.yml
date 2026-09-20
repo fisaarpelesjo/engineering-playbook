@@ -544,6 +544,7 @@ state:
     - "active_task"
     - "last_checkpoint"
     - "last_verified_commit"
+    - "last_verified_tree"
     - "validation"
     - "blockers"
     - "next_actions"

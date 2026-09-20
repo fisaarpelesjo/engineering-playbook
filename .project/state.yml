@@ -1,8 +1,8 @@
 schema_version: 1.0.0
 updated_at: '2026-09-20T20:01:18Z'
 active_workstream: WS-001
-current_branch: fix/006-reconcile-ruleset-and-activate-hooks
-issue: 25
+current_branch: fix/007-the-verdict-survives-the-squash
+issue: 30
 current_phase: converge
 status: converged
 active_specification: specs/001-engineering-playbook/spec.md

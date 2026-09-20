@@ -42,6 +42,44 @@
 # case 1, the one this hook exists for.
 #
 # =============================================================================
+# RULESET RECONCILIATION RUNS HERE, NOT IN CI -- WHY
+#
+# `scripts/verify_ruleset.py` (`engineering_playbook.core.check_ruleset_reconciliation`)
+# compares `.github/rulesets/main.yml` against the ruleset GitHub actually has
+# applied on the server, via `gh api repos/:owner/:repo/rulesets`. That
+# endpoint needs `administration` read on whichever token calls it, and
+# GitHub refuses to even start a workflow that lists `administration` under a
+# job's `permissions:` for `GITHUB_TOKEN` -- measured directly: the workflow
+# was rejected at parse time, before any step ran, not merely that one step.
+# There is no CI job this can run in with this repository's own token. It
+# runs here instead, using the `gh` authentication (`gh auth login`/`GH_TOKEN`)
+# the developer pushing already has on their own machine.
+#
+# TWO DIFFERENT ANSWERS, NEVER FOLDED INTO ONE
+#
+#   "Nao consegui medir" (no network, `gh` missing or unauthenticated, or
+#   `verify_ruleset.py` failing before it reaches a comparison) is NOT the
+#   same fact as "medi e diverge" (`gh` answered, the comparison ran, and the
+#   file disagrees with the server). NFR-002 (spec 003) is explicit: "Controle
+#   incapaz de obter a medicao retorna falha. Indisponibilidade de ambiente
+#   nao equivale a conformidade." So BOTH cases refuse the push by default --
+#   an owner decision, taken after weighing and rejecting the alternative
+#   (warn-and-pass on "could not measure"), because that alternative reads a
+#   push as reconciled when nobody actually compared anything, which is
+#   exactly what NFR-002 forbids. The two cases still print different
+#   messages (see below), because a developer who cannot fix a network
+#   outage by editing code still needs to know which one hit them, and the
+#   escape valve below only exists for the first.
+#
+#   The one relief this hook grants offline work is deliberate and visible:
+#   `PLAYBOOK_ALLOW_UNMEASURED_RULESET=1` lets a push through when the
+#   measurement itself could not be taken, and only then -- "medi e diverge"
+#   has no escape valve at all, ever. Using it costs exactly what it looks
+#   like it costs: the push happens without knowing whether the applied
+#   ruleset still matches `.github/rulesets/main.yml`, and the hook prints
+#   that fact loudly rather than letting the push look clean.
+#
+# =============================================================================
 # THE KNOWN WAYS PAST THIS GUARD, WRITTEN ON PURPOSE
 #
 # A guard whose weakness is unwritten is theatre, not a guard. So:
@@ -51,6 +89,28 @@
 #   2. `git config core.hooksPath <somewhere-else>` points git at another
 #      directory and nothing in this one runs at all. This file cannot detect
 #      that it was bypassed this way.
+#   3. The ruleset check only measures anything on a machine that has `gh`
+#      installed and authenticated already. This protects whoever pushes
+#      from such a machine; a push from anywhere else (a machine without
+#      `gh`, a CI job with no human's `gh auth`, a raw `git push` to a mirror)
+#      is not measured by this piece of the hook at all -- and per NFR-002,
+#      not being measured means the push is REFUSED, not waved through.
+#   4. `PLAYBOOK_ALLOW_UNMEASURED_RULESET=1` is the one deliberate escape
+#      valve, and it only opens the door NFR-002 closed for "could not
+#      measure" -- it does nothing for "measured and diverges". Setting it
+#      makes the hook print, every time, that the ruleset was not checked and
+#      the push happened anyway; it never lets that fact pass in silence. The
+#      cost of using it: the pusher does not know whether the applied ruleset
+#      still matches `.github/rulesets/main.yml`.
+#   5. This compares the versioned file against the server; it does not stop
+#      anyone with admin rights from changing the server ruleset directly.
+#      `.github/rulesets/main.yml` says so itself: "Declarative proposal
+#      only. Do not apply remotely without explicit authorization." The
+#      server does not enforce what this file declares unless someone with
+#      that access applies it, and this hook cannot make that happen.
+#   6. If `scripts/verify_ruleset.py` does not exist in this checkout (a
+#      derived project that never adopted this control), the ruleset check is
+#      skipped entirely rather than failing the hook -- see below.
 #
 # What this guard does NOT do: it does not run `--affected` (that mode is
 # documented in `local_ci.py` as narrower than the merge gate on purpose), it
@@ -124,6 +184,68 @@ if [ "$STATUS" -ne 0 ]; then
 
 EOF
     exit 1
+fi
+
+RULESET_SCRIPT="$REPO_ROOT/scripts/verify_ruleset.py"
+
+if [ -f "$RULESET_SCRIPT" ]; then
+    echo "pre-push: comparando .github/rulesets/main.yml com o ruleset aplicado no servidor ..." >&2
+
+    RULESET_OUTPUT="$(uv run python scripts/verify_ruleset.py 2>&1)"
+    RULESET_STATUS=$?
+
+    echo "$RULESET_OUTPUT" >&2
+
+    if [ "$RULESET_STATUS" -eq 0 ]; then
+        : # medido e reconciliado -- nada a fazer
+    elif printf '%s\n' "$RULESET_OUTPUT" | grep -q "gh nao respondeu"; then
+        if [ "${PLAYBOOK_ALLOW_UNMEASURED_RULESET:-}" = "1" ]; then
+            cat >&2 <<EOF
+
+  AVISO: RULESET NAO MEDIDO -- PUSH SEGUINDO SO PORQUE
+  PLAYBOOK_ALLOW_UNMEASURED_RULESET=1 ESTA DEFINIDA.
+
+  'gh' nao respondeu (rede ausente, 'gh auth login' pendente, ou 'gh' fora do
+  PATH) -- veja a saida acima. Este push NAO sabe se o ruleset aplicado no
+  servidor ainda bate com '.github/rulesets/main.yml'; a valvula so existe
+  para destravar quem esta genuinamente sem como medir, nunca em silencio.
+  Desligue a variavel assim que 'gh' voltar a responder.
+
+EOF
+        else
+            cat >&2 <<EOF
+
+  PUSH RECUSADO: NAO CONSEGUI MEDIR O RULESET DO SERVIDOR.
+
+  'gh' nao respondeu (rede ausente, 'gh auth login' pendente, ou 'gh' fora do
+  PATH) -- veja a saida acima. NFR-002 (spec 003): um controle incapaz de
+  obter a medicao retorna falha, indisponibilidade de ambiente nao equivale a
+  conformidade -- este push nao foi medido e por isso nao passa.
+
+  Resolva 'gh' (rede, 'gh auth login') e rode de novo. Se estiver
+  genuinamente sem como medir agora e precisar empurrar mesmo assim, defina
+  PLAYBOOK_ALLOW_UNMEASURED_RULESET=1 -- o hook vai avisar, em voz alta, que
+  o push saiu sem essa medicao.
+
+EOF
+            exit 1
+        fi
+    elif printf '%s\n' "$RULESET_OUTPUT" | grep -q "^ERROR:"; then
+        cat >&2 <<EOF
+
+  PUSH RECUSADO: o ruleset aplicado no servidor DIVERGE de
+  '.github/rulesets/main.yml' (exit $RULESET_STATUS). Veja a saida acima.
+
+  Isto foi MEDIDO, nao e falha de rede: 'gh' respondeu e a comparacao rodou.
+  Reconcilie o arquivo com o que esta aplicado no servidor, ou peca a quem
+  tem acesso administrativo para aplicar o arquivo, antes de empurrar de
+  novo.
+
+EOF
+        exit 1
+    else
+        fail_environment "scripts/verify_ruleset.py falhou de um jeito inesperado (exit $RULESET_STATUS) -- nem confirmou medicao nem apontou divergencia; veja a saida acima"
+    fi
 fi
 
 exit 0

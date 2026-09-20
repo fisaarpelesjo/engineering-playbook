@@ -351,6 +351,7 @@ def render_state() -> dict[str, Any]:
         "active_task": None,
         "last_checkpoint": None,
         "last_verified_commit": None,
+        "last_verified_tree": None,
         "validation": {"passed": [], "failed": [], "not_run": []},
         "blockers": [],
         "next_actions": ["Fill docs/requirements/project-requirements.md."],

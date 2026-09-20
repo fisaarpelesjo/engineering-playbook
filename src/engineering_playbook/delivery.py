@@ -16,6 +16,7 @@ try:
         git_head,
         git_ref_exists,
         git_status,
+        git_tree,
         load_yaml,
         utc_now,
         validate_conventional_title,
@@ -31,6 +32,7 @@ except ImportError:
         git_head,
         git_ref_exists,
         git_status,
+        git_tree,
         load_yaml,
         utc_now,
         validate_conventional_title,
@@ -489,19 +491,26 @@ def command_commit(args: argparse.Namespace) -> int:
     committed = git_head(args.root)
     prepare["head"] = committed
     write_yaml_atomic(args.root / PREPARE_FILE, prepare)
-    record_verified_commit(args.root, committed)
+    record_verified_commit(args.root, committed, git_tree(args.root, "HEAD"))
     print(completed.stdout.strip())
     return 0
 
 
-def record_verified_commit(root: Path, commit: str) -> None:
-    """Move `last_verified_commit` to the commit whose content was measured.
+def record_verified_commit(root: Path, commit: str, tree: str | None = None) -> None:
+    """Move the verified state to the commit (and tree) whose content was measured.
 
     `prepare` runs the gates against the working tree and `commit` turns that
     exact tree into a commit, so that commit is what was verified. Leaving the
     field behind makes the next `verify` fail for bookkeeping reasons, and the
     only way out was editing the state by hand -- which is how a state file
     starts claiming what nobody measured.
+
+    `last_verified_commit` stays for humans reading `.project/state.yml`; the
+    gate in `core.verify_root` reads `last_verified_tree` instead (issue #30),
+    because only the tree survives a squash unchanged. `tree` is optional so
+    callers that only ever had a commit id (nothing left calls this without
+    one) still work; when it is omitted, `last_verified_tree` is simply not
+    touched here.
     """
     state_path = root / STATE_FILE
     if not state_path.is_file():
@@ -509,9 +518,13 @@ def record_verified_commit(root: Path, commit: str) -> None:
     state = load_yaml(state_path)
     if state.get("status") not in {"verified", "converged", "done"}:
         return
-    if state.get("last_verified_commit") == commit:
+    if state.get("last_verified_commit") == commit and (
+        tree is None or state.get("last_verified_tree") == tree
+    ):
         return
     state["last_verified_commit"] = commit
+    if tree is not None:
+        state["last_verified_tree"] = tree
     state["updated_at"] = utc_now()
     write_yaml_atomic(state_path, state)
 
@@ -711,6 +724,18 @@ def record_merge_commit(
     The pull request's own state -- not that exit code -- decides success here; a non-zero
     `merge_returncode` only changes what a NOT-merged answer means: still queued (when `gh`
     itself reported success) versus a real failure (when `gh` itself reported none).
+
+    THE TREE RECORDED HERE (issue #30): this function does not fetch and inspect the squash
+    commit's tree object -- `--delete-branch` is already avoided above specifically to keep
+    this command from checking anything out, and nothing here calls `git checkout` either.
+    Instead it records `git_tree(root, "HEAD")`, the tree of the branch tip still checked
+    out locally at this point. That is deliberate, not an approximation: this repository's
+    ruleset requires `strict_required_status_checks_policy: true`, so a branch must already
+    be up to date with `main` before GitHub allows the merge, and squashing an up-to-date
+    branch onto its base produces a commit whose tree is identical to the branch tip's own
+    tree. DECLARED LIMIT: if that ruleset setting is ever relaxed, this equality is no longer
+    guaranteed and this function would need to resolve `merge_commit`'s tree directly instead
+    (after `git fetch origin`, once the object is locally available).
     """
     merge_failed = merge_returncode != 0
     view = run(root, ["gh", "pr", "view", branch, "--json", "state,mergeCommit"])
@@ -746,8 +771,13 @@ def record_merge_commit(
             f"{fetch.stderr.strip()}"
         )
         return 1
-    record_verified_commit(root, merge_commit)
-    print(f"Recorded squash merge commit as verified: {merge_commit}")
+    try:
+        squash_tree = git_tree(root, "HEAD")
+    except GitUnavailableError as failure:
+        print(f"ERROR: git nao respondeu, portanto a tree do squash nao foi medida: {failure}")
+        return 1
+    record_verified_commit(root, merge_commit, squash_tree)
+    print(f"Recorded squash merge commit as verified: {merge_commit} (tree {squash_tree})")
     delete = run(root, ["git", "push", "origin", "--delete", branch])
     if delete.returncode != 0:
         print(
