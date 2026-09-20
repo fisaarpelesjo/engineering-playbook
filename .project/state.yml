@@ -1,5 +1,5 @@
 schema_version: 1.0.0
-updated_at: '2026-09-20T18:37:17Z'
+updated_at: '2026-09-20T18:38:38Z'
 active_workstream: WS-001
 current_branch: feat/002-the-issue-is-the-contract
 issue: 21
@@ -9,8 +9,8 @@ active_specification: specs/001-engineering-playbook/spec.md
 active_plan: specs/001-engineering-playbook/plan.md
 active_tasks: specs/001-engineering-playbook/tasks.md
 active_task: T017
-last_checkpoint: .project/checkpoints/CP-20260920-016.yml
-last_verified_commit: c713bc4ef0cef2106b3ff4b847a79abc401f868a
+last_checkpoint: .project/checkpoints/CP-20260920-017.yml
+last_verified_commit: c575f10be56ca21af810326456334d8b9e74c24f
 validation:
   passed:
   - uv sync --locked
