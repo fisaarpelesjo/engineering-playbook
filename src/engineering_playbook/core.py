@@ -801,11 +801,13 @@ def verify_root(root: Path) -> CheckResult:
         ]:
             result.add(required in ruleset_text, f"Ruleset missing required policy: {required}")
 
-    tasks_path = root / "specs/001-engineering-playbook/tasks.md"
-    if tasks_path.exists():
+    for tasks_path in sorted(root.glob("specs/*/tasks.md")):
         task_ids = re.findall(r"^- (T[0-9]{3}):", tasks_path.read_text(encoding="utf-8"), re.M)
         duplicates = sorted({item for item in task_ids if task_ids.count(item) > 1})
-        result.add(not duplicates, f"Duplicate task IDs found: {', '.join(duplicates)}")
+        result.add(
+            not duplicates,
+            f"Duplicate task IDs found in {tasks_path.relative_to(root)}: {', '.join(duplicates)}",
+        )
 
     cursor_rule = root / ".cursor/rules/engineering.mdc"
     if cursor_rule.exists():

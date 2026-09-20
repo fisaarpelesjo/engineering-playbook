@@ -87,6 +87,113 @@ def validate_pr_title(title: str) -> bool:
     return validate_conventional_title(title)
 
 
+# =============================================================================
+# THE ISSUE GATE -- one question, two callers, and its known weaknesses.
+#
+# `command_publish` and `command_validate_ci` both refuse work that is not tied
+# to an existing, OPEN GitHub issue (spec 002, FR-002/FR-003/FR-004). Both call
+# `issue_is_open` below instead of each growing its own answer to "does this
+# issue satisfy the contract" -- two implementations of the same question is
+# the defect spec 015 measured in the other repository.
+#
+# THE KNOWN WAYS PAST THIS GUARD, WRITTEN ON PURPOSE.
+#
+# A guard whose weakness is written down is a guard. A guard whose weakness is
+# left unsaid is theatre. So:
+#
+#   1. `command_publish` only runs when someone actually runs
+#      `scripts/delivery.py publish`. A push done by hand (`git push` followed
+#      by `gh pr create` outside this script) never calls it at all.
+#   2. The CI side (`validate-ci --pr-body`) only runs `if: github.event_name
+#      == 'pull_request'` (see `.github/workflows/quality.yml`), so a direct
+#      push to a branch that never goes through a pull request never reaches
+#      it either. The ruleset in `.github/rulesets/main.yml` that would force
+#      every change through a pull request says of itself that it is a
+#      "declarative proposal only", not applied remotely.
+#   3. `issue_from_pr_body` only reads the closing keywords GitHub itself
+#      recognizes (`Closes #N`, `Fixes #N`, `Resolves #N`, and their tenses).
+#      It confirms an open issue number is PRESENT in the body, never that it
+#      is the RIGHT issue for the change in the diff -- a PR body pointing at
+#      an unrelated, still-open issue passes exactly the same as a correct one.
+#   4. `issue_is_open` tells "issue does not exist" apart from "gh could not
+#      answer" by matching known substrings in `gh`'s stderr (see
+#      `ISSUE_NOT_FOUND_MARKERS`). If GitHub ever changes that wording, a real
+#      outage could be misread as "issue not found" (still a refusal, safe by
+#      NFR-003, but the wrong message) or a nonexistent issue could be misread
+#      as an outage (also still a refusal, never a silent pass).
+#   5. `command_publish`'s own "cartao declarado" check only reads the `issue`
+#      field out of `.project/state.yml`. That file is not signed by anyone;
+#      hand-editing it to the number of an unrelated, still-open issue passes
+#      this gate the same as a genuine one, for the same reason as point 3.
+#   6. Both callers depend on `gh` itself being authenticated and able to see
+#      the issue (`GH_TOKEN` locally, `secrets.GITHUB_TOKEN` plus `issues:
+#      read` permission in CI). A token that can reach GitHub but lacks
+#      permission on this repository's issues can produce the same
+#      not-found-shaped answer as an issue that truly does not exist.
+# =============================================================================
+
+
+class IssueLookupError(RuntimeError):
+    """`gh` could not answer whether an issue exists and is open.
+
+    Covers `gh` missing from PATH, no network reaching GitHub, and no
+    authentication configured. NFR-003 treats all three the same way: an
+    environment that cannot measure refuses, it never passes silently.
+    """
+
+
+ISSUE_NOT_FOUND_MARKERS = (
+    "could not resolve to an issue",
+    "no default remote repository",
+)
+
+CLOSING_KEYWORD_PATTERN = re.compile(
+    r"(?i)\b(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?)\s*:?\s*#(\d+)\b"
+)
+
+
+def issue_from_pr_body(body: str) -> int | None:
+    """The issue number a pull request body closes, via GitHub's own closing keywords.
+
+    This reads the exact mechanism GitHub itself uses to link a pull request to an
+    issue (`Closes #N`, `Fixes #N`, `Resolves #N`, and their tenses), off the PR body
+    the CI event already carries. The `issue` field in `.project/state.yml` is
+    deliberately not consulted here: CI runs on a checkout, not on the author's
+    machine, and that field records the contributor's own bookkeeping for whatever
+    fatia they currently have active -- not a GitHub-verified closing relationship
+    for the exact pull request under review. The two can point at different issues
+    without anything local catching it (see weakness 5 above).
+    """
+    match = CLOSING_KEYWORD_PATTERN.search(body or "")
+    return int(match.group(1)) if match else None
+
+
+def issue_is_open(root: Path, number: int) -> bool:
+    """True only when issue `number` exists on GitHub AND is currently open.
+
+    A closed issue and a nonexistent issue are answered the same way here -- False
+    -- because FR-004 treats both as not satisfying the contract; a caller that
+    wants a different message for the two asks `gh` again on its own reporting path.
+
+    Raises `IssueLookupError` when `gh` itself could not answer -- see the module
+    note above for exactly which cases and their known blind spots.
+    """
+    try:
+        completed = run(root, ["gh", "issue", "view", str(number), "--json", "state"])
+    except OSError as failure:  # gh missing from PATH
+        raise IssueLookupError(f"gh nao pode ser executado: {failure}") from None
+    if completed.returncode != 0:
+        stderr = completed.stderr.strip()
+        if any(marker in stderr.lower() for marker in ISSUE_NOT_FOUND_MARKERS):
+            return False
+        raise IssueLookupError(
+            f"gh issue view {number} saiu com {completed.returncode}, portanto a "
+            f"existencia da issue nao foi medida: {stderr or 'sem stderr'}"
+        )
+    data: dict[str, Any] = json.loads(completed.stdout)
+    return data.get("state") == "OPEN"
+
+
 def local_commits(root: Path, base: str = "main") -> list[str]:
     """Commits on HEAD that `base` does not have yet.
 
@@ -430,6 +537,25 @@ def require_remote_authorization(args: argparse.Namespace) -> bool:
 def command_publish(args: argparse.Namespace) -> int:
     if not require_remote_authorization(args):
         return 1
+    state_for_issue = load_yaml(args.root / STATE_FILE)
+    declared_issue = state_for_issue.get("issue")
+    if not declared_issue:
+        print(
+            "ERROR: no issue declared. Add `issue: <number>` to "
+            f"{STATE_FILE}, pointing at the GitHub issue this fatia closes, then retry."
+        )
+        return 1
+    try:
+        issue_open = issue_is_open(args.root, declared_issue)
+    except IssueLookupError as failure:
+        print(f"ERROR: could not verify issue #{declared_issue}, refusing to publish: {failure}")
+        return 1
+    if not issue_open:
+        print(
+            f"ERROR: issue #{declared_issue} does not exist or is not open. "
+            "Declare an existing, open issue before publishing."
+        )
+        return 1
     branch = git_branch(args.root)
     publish_errors = validate_publish_plan(branch)
     if publish_errors:
@@ -665,6 +791,28 @@ def command_validate_ci(args: argparse.Namespace) -> int:
     if args.pr_title and not validate_pr_title(args.pr_title):
         print(f"ERROR: invalid PR title: {args.pr_title}")
         failed = True
+    if getattr(args, "pr_body", None) is not None:
+        issue_number = issue_from_pr_body(args.pr_body)
+        if issue_number is None:
+            print(
+                "ERROR: pull request body does not close an issue. Add "
+                "'Closes #<number>' (or Fixes/Resolves) naming an existing, "
+                "open issue to the pull request body."
+            )
+            failed = True
+        else:
+            try:
+                open_issue = issue_is_open(args.root, issue_number)
+            except IssueLookupError as failure:
+                print(f"ERROR: could not verify issue #{issue_number}, refusing: {failure}")
+                failed = True
+            else:
+                if not open_issue:
+                    print(
+                        f"ERROR: issue #{issue_number} does not exist or is not open. "
+                        "Link the pull request to an existing, open issue."
+                    )
+                    failed = True
     return 1 if failed else 0
 
 
@@ -700,6 +848,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     validate_ci = subparsers.add_parser("validate-ci")
     validate_ci.add_argument("--branch")
     validate_ci.add_argument("--pr-title")
+    validate_ci.add_argument("--pr-body")
     return parser.parse_args(argv)
 
 

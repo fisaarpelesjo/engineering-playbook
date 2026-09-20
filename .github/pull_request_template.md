@@ -1,10 +1,13 @@
 ## Summary
 <!-- Use a Conventional Commits PR title. It becomes the squash commit title. -->
 
+## Issue
+Closes #<number>
+
 ## Problem and motivation
 
 ## Specification and requirements
-<!-- Reference PRD, spec, issue or ADR IDs. -->
+<!-- Reference PRD, spec or ADR IDs. -->
 
 ## Changes
 

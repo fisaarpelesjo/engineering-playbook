@@ -30,6 +30,7 @@
     "updated_at_local": {"type": "string"},
     "timezone": {"type": "string"},
     "authorized_scope": {"type": ["string", "null"]},
-    "owner_authorization_required": {"type": "boolean"}
+    "owner_authorization_required": {"type": "boolean"},
+    "issue": {"type": "integer", "minimum": 1}
   }
 }

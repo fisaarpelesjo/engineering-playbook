@@ -39,6 +39,23 @@ def test_verify_current_repository() -> None:
     assert result.errors == []
 
 
+def test_verify_root_finds_duplicate_task_ids_outside_spec_001(tmp_path: Path) -> None:
+    """AC-006: the duplicate-task check must not be fixed to `specs/001-engineering-playbook`."""
+    spec_dir = tmp_path / "specs" / "099-example"
+    spec_dir.mkdir(parents=True)
+    (spec_dir / "tasks.md").write_text(
+        "# Tasks\n\n- T001: First task.\n- T001: Duplicate of the first.\n- T002: Unique task.\n",
+        encoding="utf-8",
+    )
+
+    result = verify_root(tmp_path)
+
+    assert any("T001" in error for error in result.errors), (
+        "verify_root did not flag a duplicate task ID in a spec other than "
+        "specs/001-engineering-playbook"
+    )
+
+
 def test_state_transition_rejects_planned_to_done() -> None:
     assert not validate_transition("planned", "done")
     assert validate_transition("planned", "ready")
