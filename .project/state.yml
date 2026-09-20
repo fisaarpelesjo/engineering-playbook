@@ -1,5 +1,5 @@
 schema_version: 1.0.0
-updated_at: '2026-09-20T19:30:45Z'
+updated_at: '2026-09-20T19:35:34Z'
 active_workstream: WS-001
 current_branch: fix/006-reconcile-ruleset-and-activate-hooks
 issue: 25
@@ -9,8 +9,8 @@ active_specification: specs/001-engineering-playbook/spec.md
 active_plan: specs/001-engineering-playbook/plan.md
 active_tasks: specs/001-engineering-playbook/tasks.md
 active_task: T017
-last_checkpoint: .project/checkpoints/CP-20260920-023.yml
-last_verified_commit: 19cbec2cbbbca3b310c65dba4dcae7e18d1a9c36
+last_checkpoint: .project/checkpoints/CP-20260920-025.yml
+last_verified_commit: e1ef6f207cd278e13f28bdc24159b35ac5f7e056
 validation:
   passed:
   - uv sync --locked
@@ -32,9 +32,9 @@ blockers: []
 next_actions:
 - Retomar com uv run python scripts/resume.py antes de novas mudancas.
 delivery:
-  branch: fix/005-merge-trusts-the-pull-request
+  branch: fix/006-reconcile-ruleset-and-activate-hooks
   base: main
   remote: origin
-  pr_number: 19
-  pr_url: https://github.com/fisaarpelesjo/engineering-playbook/pull/19
-  updated_at: '2026-09-20T18:04:36Z'
+  pr_number: 29
+  pr_url: https://github.com/fisaarpelesjo/engineering-playbook/pull/29
+  updated_at: '2026-09-20T19:31:49Z'
