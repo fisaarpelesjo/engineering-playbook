@@ -1,15 +1,15 @@
 schema_version: 1.0.0
-updated_at: '2026-09-20T17:40:36Z'
+updated_at: '2026-09-20T18:04:23Z'
 active_workstream: WS-001
-current_branch: fix/004-verified-commit-survives-squash
+current_branch: fix/005-merge-trusts-the-pull-request
 current_phase: converge
 status: converged
 active_specification: specs/001-engineering-playbook/spec.md
 active_plan: specs/001-engineering-playbook/plan.md
 active_tasks: specs/001-engineering-playbook/tasks.md
 active_task: T017
-last_checkpoint: .project/checkpoints/CP-20260920-011.yml
-last_verified_commit: 2955be5af369c206587b4c14514603a10eed351c
+last_checkpoint: .project/checkpoints/CP-20260920-013.yml
+last_verified_commit: f87360654f67d8bd413537823dd4673ef5f45d3f
 validation:
   passed:
   - uv sync --locked

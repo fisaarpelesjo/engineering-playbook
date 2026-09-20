@@ -532,24 +532,34 @@ def command_merge(args: argparse.Namespace) -> int:
         print("ERROR: PR is missing.")
         return 1
     title = json.loads(pr.stdout)["title"]
+    # `--delete-branch` is deliberately not passed to `gh pr merge` here: it makes `gh`
+    # check out the base branch locally to remove the merged branch, and that checkout
+    # is what failed with "Your local changes ... would be overwritten by checkout" on
+    # two real pull requests -- the tree was already dirty from `publish` writing
+    # `.project/state.yml` before `merge` ever ran, nothing this command did itself.
+    # Deleting the branch on the remote afterwards (below, once the merge is confirmed)
+    # needs no local checkout at all, so it cannot be broken by that same dirty tree.
     merge = run(
         args.root,
-        ["gh", "pr", "merge", branch, "--auto", "--squash", "--delete-branch", "--subject", title],
+        ["gh", "pr", "merge", branch, "--auto", "--squash", "--subject", title],
     )
-    if merge.returncode != 0:
+    if merge.returncode == 0:
+        print(merge.stdout.strip())
+    else:
+        # A non-zero exit here is not proof the merge failed: `gh pr merge` can still
+        # exit non-zero after the server has already merged, e.g. because a follow-up
+        # step choked. `record_merge_commit` asks the pull request itself before this
+        # is reported as a failure.
         print(merge.stderr.strip())
-        return merge.returncode
-    print(merge.stdout.strip())
-    # Only now, after `--delete-branch` has already done whatever local checkout it was
-    # going to do, is it safe to let checkpoint write .project/state.yml. Doing this before
-    # `gh pr merge` dirtied the tree the checkout needed clean and `--delete-branch` failed
-    # with "Your local changes ... would be overwritten by checkout" -- measured on two real
-    # pull requests, both after a squash merge that had already succeeded on the server.
     run(args.root, ["uv", "run", "python", "scripts/checkpoint.py"])
-    return record_merge_commit(args.root, branch)
+    return record_merge_commit(
+        args.root, branch, merge_returncode=merge.returncode, merge_stderr=merge.stderr.strip()
+    )
 
 
-def record_merge_commit(root: Path, branch: str) -> int:
+def record_merge_commit(
+    root: Path, branch: str, *, merge_returncode: int = 0, merge_stderr: str = ""
+) -> int:
     """Resolve the squash commit GitHub created for `branch` and record it as verified.
 
     `gh pr merge --auto` merges immediately when checks already passed, but only queues
@@ -559,21 +569,41 @@ def record_merge_commit(root: Path, branch: str) -> int:
     `last_verified_commit` that `git merge-base --is-ancestor` answers NAO to. Only a commit
     this function actually measured on the remote is written; a merge still in flight is
     reported, not guessed at or waited for.
+
+    `merge_returncode` is the exit code `gh pr merge` itself returned, kept separate from
+    what actually happened on the server: it was measured non-zero (PR #17) even though the
+    squash merge had already succeeded, because a local-only cleanup step failed afterwards.
+    The pull request's own state -- not that exit code -- decides success here; a non-zero
+    `merge_returncode` only changes what a NOT-merged answer means: still queued (when `gh`
+    itself reported success) versus a real failure (when `gh` itself reported none).
     """
+    merge_failed = merge_returncode != 0
     view = run(root, ["gh", "pr", "view", branch, "--json", "state,mergeCommit"])
     if view.returncode != 0:
         print(f"ERROR: could not query the merge result for {branch}: {view.stderr.strip()}")
-        return 1
+        return merge_returncode if merge_failed else 1
     data: dict[str, Any] = json.loads(view.stdout)
     merge_commit_field: dict[str, Any] = data.get("mergeCommit") or {}
     merge_commit: str | None = merge_commit_field.get("oid")
     if data.get("state") != "MERGED" or not merge_commit:
+        if merge_failed:
+            print(
+                f"ERROR: gh pr merge failed for {branch} and the pull request is not "
+                f"merged: {merge_stderr}"
+            )
+            return merge_returncode
         print(
             f"Merge for {branch} is queued for auto-merge; the checks have not "
             "finished and no squash commit exists yet. Nothing was recorded. Re-run "
             "`merge --auto --yes-remote` once the pull request has actually merged."
         )
         return 2
+    if merge_failed:
+        print(
+            f"NOTE: gh pr merge exited {merge_returncode} for {branch}, but the pull "
+            f"request is MERGED on the server ({merge_commit}). Treating this as success; "
+            f"only local cleanup failed: {merge_stderr}"
+        )
     fetch = run(root, ["git", "fetch", "origin"])
     if fetch.returncode != 0:
         print(
@@ -583,6 +613,12 @@ def record_merge_commit(root: Path, branch: str) -> int:
         return 1
     record_verified_commit(root, merge_commit)
     print(f"Recorded squash merge commit as verified: {merge_commit}")
+    delete = run(root, ["git", "push", "origin", "--delete", branch])
+    if delete.returncode != 0:
+        print(
+            f"WARNING: could not delete remote branch {branch} (the server merge already "
+            f"succeeded): {delete.stderr.strip()}"
+        )
     return 0
 
 
