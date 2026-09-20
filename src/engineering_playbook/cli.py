@@ -12,6 +12,7 @@ from .commands import (
     command_reconcile,
     command_resume,
     command_verify,
+    command_verify_ruleset,
 )
 from .delivery import main as delivery_main
 from .installer import command_init, command_update
@@ -47,6 +48,13 @@ def build_parser() -> argparse.ArgumentParser:
 
     add_root(subparsers.add_parser("doctor"))
     add_root(subparsers.add_parser("verify"))
+    add_root(
+        subparsers.add_parser(
+            "verify-ruleset",
+            help="Compare .github/rulesets/main.yml against the ruleset applied on the "
+            "server (requires gh, authenticated, with network).",
+        )
+    )
     resume = add_root(subparsers.add_parser("resume"))
     resume.add_argument("--format", choices=["human", "markdown", "json"], default="human")
     reconcile = add_root(subparsers.add_parser("reconcile"))
@@ -94,6 +102,8 @@ def main(argv: list[str] | None = None) -> int:
         return command_doctor(root)
     if args.command == "verify":
         return command_verify(root)
+    if args.command == "verify-ruleset":
+        return command_verify_ruleset(root)
     if args.command == "resume":
         return command_resume(root, args.format)
     if args.command == "reconcile":

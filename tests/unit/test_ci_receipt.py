@@ -14,7 +14,7 @@ from typing import Any
 
 from engineering_playbook.commands import command_checkpoint
 from engineering_playbook.core import load_yaml, write_yaml_atomic
-from engineering_playbook.installer import command_init
+from engineering_playbook.installer import command_init, configure_hooks_path
 from engineering_playbook.receipt import (
     CiReceiptStatus,
     battery_claims,
@@ -32,7 +32,12 @@ def init_git(root: Path) -> None:
 
 def commit_all(root: Path, message: str) -> None:
     subprocess.run(["git", "add", "."], cwd=root, check=True)
-    subprocess.run(["git", "commit", "-q", "-m", message], cwd=root, check=True)
+    # --no-verify: this fixture commits directly on `main` for simplicity, and
+    # `build_derived_project` now activates the real `scripts/git-hooks/pre-commit` (T203),
+    # which refuses exactly that. This file tests the CI-receipt/checkpoint gate, not the
+    # commit hook -- `scripts/git-hooks/pre-commit`'s own tests (`test_git_hooks.py`) are
+    # what exercise that refusal.
+    subprocess.run(["git", "commit", "-q", "-m", message, "--no-verify"], cwd=root, check=True)
 
 
 def head_of(root: Path) -> str:
@@ -42,7 +47,16 @@ def head_of(root: Path) -> str:
 
 
 def build_derived_project(root: Path) -> Path:
-    """A fully installed derived project, verify_root-clean, with one commit."""
+    """A fully installed derived project, verify_root-clean, with one commit.
+
+    `command_init` runs first because it is what creates `root` itself
+    (`apply_init`'s `plan.root.mkdir(...)`) -- `git init` cannot run in a directory that does
+    not exist yet. T203 made `command_init` configure `core.hooksPath` as part of installing
+    `scripts/git-hooks`, but that configuration is a no-op without a `.git` to write it into
+    yet (see `configure_hooks_path`'s own docstring), so `configure_hooks_path` runs again,
+    explicitly, once `init_git` has created one -- the same call a second
+    `engineering-playbook init`/`update` would make in this exact situation.
+    """
     args = argparse.Namespace(
         path=root,
         project_name=None,
@@ -55,6 +69,7 @@ def build_derived_project(root: Path) -> Path:
     )
     assert command_init(args) == 0
     init_git(root)
+    configure_hooks_path(root)
     commit_all(root, "init")
     return root
 

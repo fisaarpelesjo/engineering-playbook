@@ -1,0 +1,19 @@
+# Tasks: Nenhuma etapa sem mecanismo
+
+- T201: Reconciliar `.github/rulesets/main.yml` com a configuracao aplicada e implementar controle que compare ficheiro e resposta da API. Mecanismo: controle em integracao continua. Refs: FR-001, FR-002, AC-006.
+- T202: Executar tentativa de push directo para a branch por omissao e registar a rejeicao observada. Mecanismo: ruleset no servidor. Refs: AC-001.
+- T203: Configurar `core.hooksPath` no bootstrap e implementar rejeicao em `doctor` e `verify` quando os hooks de cliente nao estiverem activos. Mecanismo: comando do pipeline e controle em integracao continua. Refs: FR-003, AC-002.
+- T204: Arbitrar a coexistencia entre `.pre-commit-config.yaml` e `scripts/git-hooks`, registar a decisao e implementar controle que rejeite ambos activos simultaneamente. Mecanismo: decisao registada e controle executavel. Refs: FR-004.
+- T205: Implementar controle de harness que rejeite invocacao de escrita em git fora do pipeline. Mecanismo: `PreToolUse`, avaliado pelo harness anteriormente a execucao da ferramenta. Refs: FR-011, AC-007.
+- T206: Documentar o alcance de cada mecanismo, incluindo a limitacao do controle de harness a estacao de trabalho configurada. Mecanismo: texto adjacente ao controle e teste que o verifica. Refs: FR-012, FR-009.
+- T207: Implementar recibo por etapa e rejeicao de etapa cujo antecessor nao possua recibo valido. Mecanismo: artefacto de recibo lido pela etapa subsequente. Refs: FR-005, AC-003.
+- T208: Emitir attestation em `quality.yml`, assinada pela identidade OIDC da execucao, com o digest do conteudo como sujeito. Mecanismo: identidade da execucao, inacessivel ao executor da entrega. Refs: FR-006, AC-004.
+- T209: Reclassificar `last_verified_commit` como cache de leitura do veredicto assinado. Mecanismo: verificacao da attestation em substituicao a leitura do ficheiro de estado. Refs: FR-007.
+- T210: Implementar rejeicao de caso de teste ignorado sem justificativa declarada. Mecanismo: asserçao sobre o relatorio de execucao, nao sobre o codigo de saida. Refs: FR-008, AC-005.
+- T211: Revisar a especificacao contra a FR-010, confirmando mecanismo nomeado por requisito. Mecanismo: revisao manual. Unica tarefa desta lista sem mecanismo automatizado, condicao registada explicitamente. Refs: FR-010, AC-008.
+- T212: Implementar verificacao da cadeia de rastreabilidade entre pull request e requisito do PRD, com identificacao nominal do elo ausente. Mecanismo: controle em integracao continua sobre o evento de pull request. Refs: FR-013, AC-009.
+- T213: Implementar rejeicao de alteracao de codigo nao associada a especificacao activa. Mecanismo: controle em integracao continua sobre os caminhos alterados pela pull request. Refs: FR-014, AC-010.
+- T214: Implementar verificacao automatizada da matriz de cobertura, rejeitando classificacao `ausente` remanescente. Mecanismo: teste que le a propria matriz, de modo a impedir desactualizacao silenciosa. Refs: FR-016, AC-011.
+- T215: Implementar suite adversarial do pipeline, com uma tentativa por vetor de bypass enumerado e asserçao sobre a rejeicao observada. Mecanismo: suite executada em integracao continua. Refs: FR-018, AC-013.
+- T216: Executar teste de mutacao de controle: remover cada mecanismo individualmente e confirmar a falha da suite adversarial. Mecanismo: a propria suite, avaliada contra a ausencia do controle. Refs: FR-017, AC-012.
+- T217: Registar na suite adversarial o limite de cobertura declarado na NFR-005, com teste que verifique a presenca do registo. Mecanismo: teste sobre o texto da suite. Refs: NFR-005.
