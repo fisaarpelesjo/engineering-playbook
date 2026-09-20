@@ -58,6 +58,8 @@ pelo processo local, qualquer controle posicionado acima dele e ornamental.
 - FR-017: Cada mecanismo possui teste adversarial que falha contra a revisao de codigo anterior a introducao do mecanismo.
 - FR-018: Existe suite adversarial do pipeline que exercita cada vetor de bypass enumerado e assere a rejeicao observada, nao inferida.
 - FR-019: Vetor de bypass descoberto posteriormente e incorporado a suite adversarial previamente a correccao correspondente.
+- FR-020: Projecto derivado sem integracao continua mantem o mecanismo anterior de verificacao. A resolucao do defeito estrutural do squash e declarada como restrita aos projectos que dispoem de integracao continua, em vez de afirmada universalmente.
+- FR-021: O controlo de reconciliacao do ruleset executa no `pre-push`, sob a credencial do proprio operador. A execucao em integracao continua e inviavel: o endpoint exige permissao de administracao, inalcancavel pelo token de workflow.
 
 ## Non-Functional Requirements
 
@@ -125,3 +127,26 @@ a pull request e requisito do ruleset. `parcial`: mecanismo presente com vetor d
 - **Instancia publica de Sigstore como dependencia autonoma**: desnecessaria, dado que o repositorio e
   publico e o mecanismo nativo de attestation cobre o caso sem dependencia adicional.
 - **Substituicao do hook de cliente por framework de terceiros**: ver NFR-001.
+
+## Decisoes registadas
+
+Tomadas pelo proprietario em 2026-09-20, apos medicao, e vinculantes para as fatias subsequentes.
+
+**Sequenciamento do veredicto.** A substituicao de `last_verified_commit` por `last_verified_tree`
+precede a attestation. Fundamento medido: a tree hash e funcao exclusiva do conteudo e sobrevive ao
+squash, dado que `strict_required_status_checks_policy` esta activo e obriga a branch a estar
+actualizada perante a base. A medida fecha a mecanica do defeito sem dependencia externa nem
+ampliacao de escopo de token. **Nao satisfaz a FR-006**: o campo permanece escrito e lido pelo
+executor da entrega, sem separacao de funcoes e sem prova verificavel por terceiro. A attestation
+assinada permanece como fatia subsequente, condicionada a autorizacao explicita da dependencia
+`actions/attest` e da ampliacao de `permissions`.
+
+**Localizacao do controlo de ruleset.** Executa no `pre-push`, sob a credencial do operador. Limite
+declarado: protege exclusivamente operacoes originadas em estacao com o hook instalado e `gh`
+autenticado; operacoes originadas noutro ambiente nao sao medidas, e o servidor nao impoe este
+controlo.
+
+**Projectos derivados sem integracao continua.** Mantem o mecanismo anterior. A alternativa avaliada
+-- proibir squash nesses projectos, forcando merge commit real, sob o qual o identificador da branch
+sobrevive como segundo progenitor -- foi rejeitada por impor politica de historico a projectos que
+nao a escolheram.

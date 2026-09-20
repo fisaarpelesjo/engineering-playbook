@@ -15,6 +15,7 @@
     "active_task": {"type": ["string", "null"], "pattern": "^T[0-9]{3,5}$"},
     "last_checkpoint": {"type": ["string", "null"]},
     "last_verified_commit": {"type": ["string", "null"]},
+    "last_verified_tree": {"type": ["string", "null"]},
     "validation": {
       "type": "object",
       "required": ["passed", "failed", "not_run"],

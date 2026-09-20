@@ -396,6 +396,23 @@ def git_parents(root: Path) -> list[str]:
     return line.split()[1:]
 
 
+def git_tree(root: Path, ref: str) -> str:
+    """The tree object `ref` resolves to -- the part of a commit that is a pure
+    function of content. A commit id also encodes parent, author, message and
+    timestamp, so a squash merge mints a brand-new id every time even when the
+    content it carries is identical to the branch tip that was actually
+    verified. The tree does not: `git commit-tree` proves this directly (see
+    `tests/unit/test_tree_survives_the_squash.py`).
+
+    Only `ref` itself is checked for existence, mirroring `git_head`: a ref
+    that resolves but has no parent (a root commit asked with `HEAD^`) is a
+    caller error, not this function's concern.
+    """
+    if not git_ref_exists(root, ref):
+        return "unborn"
+    return git_capture(root, "rev-parse", "--verify", f"{ref}^{{tree}}")
+
+
 def git_status(root: Path) -> list[str]:
     output = git_capture(root, "status", "--short")
     return [line for line in output.splitlines() if line.strip()]
@@ -772,12 +789,18 @@ def verify_root(root: Path) -> CheckResult:
     result = CheckResult(errors=[], warnings=[])
     source_repository = (root / ".project/distribution.yml").exists()
     required_files = REQUIRED_FILES if source_repository else BASE_REQUIRED_FILES
+    # A derived project declaring `ci: none` has no Actions workflow, therefore no workflow
+    # identity and nothing that could attest a tree. Owner decision (issue #30): those
+    # projects keep the pre-existing commit/ancestry mechanism below rather than the
+    # tree-based one, so this flag is read again further down, at the state gate.
+    derived_ci_none = False
     if not source_repository:
         lock_path = root / ".project/playbook.lock.yml"
         if lock_path.exists():
             lock = load_yaml(lock_path)
             selected_agents = set(lock.get("playbook", {}).get("agents", []))
             ci = lock.get("playbook", {}).get("ci", "github")
+            derived_ci_none = ci == "none"
             optional: set[str] = set()
             for agent, paths in DERIVED_ADAPTER_FILES.items():
                 if agent not in selected_agents:
@@ -857,18 +880,62 @@ def verify_root(root: Path) -> CheckResult:
                 f"Status {state.get('status')} requires a blocker/reason",
             )
         if state.get("status") in {"verified", "converged", "done"}:
-            try:
-                accepted = {git_head(root), *git_parents(root)}
-            except GitUnavailableError as failure:
-                result.errors.append(
-                    f"git nao respondeu, portanto last_verified_commit nao foi comparado: {failure}"
-                )
+            # THE VERDICT: TREE NOW, ATTESTATION LATER (issue #30, spec 003 FR-006/FR-007).
+            #
+            # `last_verified_commit` cannot survive a squash by construction: no commit can
+            # name the SHA that only exists once the squash creates it. Measured on runs
+            # 35526666891 and 35527933400: `git merge-base --is-ancestor <recorded>
+            # origin/main` answered NAO on main right after a clean squash merge. A commit is
+            # `tree + parent + author + message`; only the tree is a pure function of
+            # content. With this repository's ruleset requiring
+            # `strict_required_status_checks_policy: true` (a branch must be up to date with
+            # its base before merging), the squash GitHub creates has a tree identical to the
+            # branch tip that was actually verified -- so the tree, not the commit id, is
+            # what this gate compares.
+            #
+            # DECLARED LIMIT, on purpose: this closes the squash-survival mechanic. It does
+            # NOT satisfy FR-006. `last_verified_tree` is still written and read by the same
+            # actor that delivers the change -- there is no separation between the executor
+            # and the emitter of the verdict, and no proof a third party can check without
+            # trusting this file. That separation is the next slice, with a signed
+            # attestation (`actions/attest` or equivalent) under explicit owner authorization.
+            # `last_verified_commit` remains in the schema as an informative field only: it
+            # is still written for humans reading `.project/state.yml`, but nothing in this
+            # function gates on it any more.
+            #
+            # DERIVED PROJECTS WITHOUT CI (owner decision, same issue): a project declaring
+            # `ci: none` has no Actions workflow, therefore no workflow identity to trust
+            # even at this reduced level. Those projects keep the pre-existing
+            # commit/ancestry mechanism unchanged below.
+            if derived_ci_none:
+                try:
+                    accepted_commits = {git_head(root), *git_parents(root)}
+                except GitUnavailableError as failure:
+                    result.errors.append(
+                        f"git nao respondeu, portanto last_verified_commit nao foi comparado: "
+                        f"{failure}"
+                    )
+                else:
+                    result.add(
+                        state.get("last_verified_commit") in accepted_commits,
+                        "Verified/converged state requires last_verified_commit to match HEAD "
+                        "or one of its parent commits",
+                    )
             else:
-                result.add(
-                    state.get("last_verified_commit") in accepted,
-                    "Verified/converged state requires last_verified_commit to match HEAD "
-                    "or one of its parent commits",
-                )
+                try:
+                    accepted_trees = {git_tree(root, "HEAD")}
+                    accepted_trees.update(git_tree(root, parent) for parent in git_parents(root))
+                except GitUnavailableError as failure:
+                    result.errors.append(
+                        f"git nao respondeu, portanto last_verified_tree nao foi comparado: "
+                        f"{failure}"
+                    )
+                else:
+                    result.add(
+                        state.get("last_verified_tree") in accepted_trees,
+                        "Verified/converged state requires last_verified_tree to match "
+                        "HEAD's tree or the tree of one of its parent commits",
+                    )
 
     if not source_repository:
         lock_path = root / ".project/playbook.lock.yml"
