@@ -527,7 +527,6 @@ def command_merge(args: argparse.Namespace) -> int:
     if branch_is_main(branch):
         print("ERROR: merge requires a pull request branch.")
         return 1
-    run(args.root, ["uv", "run", "python", "scripts/checkpoint.py"])
     pr = run(args.root, ["gh", "pr", "view", branch, "--json", "title,number"])
     if pr.returncode != 0:
         print("ERROR: PR is missing.")
@@ -541,6 +540,49 @@ def command_merge(args: argparse.Namespace) -> int:
         print(merge.stderr.strip())
         return merge.returncode
     print(merge.stdout.strip())
+    # Only now, after `--delete-branch` has already done whatever local checkout it was
+    # going to do, is it safe to let checkpoint write .project/state.yml. Doing this before
+    # `gh pr merge` dirtied the tree the checkout needed clean and `--delete-branch` failed
+    # with "Your local changes ... would be overwritten by checkout" -- measured on two real
+    # pull requests, both after a squash merge that had already succeeded on the server.
+    run(args.root, ["uv", "run", "python", "scripts/checkpoint.py"])
+    return record_merge_commit(args.root, branch)
+
+
+def record_merge_commit(root: Path, branch: str) -> int:
+    """Resolve the squash commit GitHub created for `branch` and record it as verified.
+
+    `gh pr merge --auto` merges immediately when checks already passed, but only queues
+    auto-merge -- and returns before any squash commit exists -- when checks are still
+    running. The branch tip that `record_verified_commit` used to be given here is the
+    commit the squash on main erases from history, so `verify`/`resume` on main then see a
+    `last_verified_commit` that `git merge-base --is-ancestor` answers NAO to. Only a commit
+    this function actually measured on the remote is written; a merge still in flight is
+    reported, not guessed at or waited for.
+    """
+    view = run(root, ["gh", "pr", "view", branch, "--json", "state,mergeCommit"])
+    if view.returncode != 0:
+        print(f"ERROR: could not query the merge result for {branch}: {view.stderr.strip()}")
+        return 1
+    data: dict[str, Any] = json.loads(view.stdout)
+    merge_commit_field: dict[str, Any] = data.get("mergeCommit") or {}
+    merge_commit: str | None = merge_commit_field.get("oid")
+    if data.get("state") != "MERGED" or not merge_commit:
+        print(
+            f"Merge for {branch} is queued for auto-merge; the checks have not "
+            "finished and no squash commit exists yet. Nothing was recorded. Re-run "
+            "`merge --auto --yes-remote` once the pull request has actually merged."
+        )
+        return 2
+    fetch = run(root, ["git", "fetch", "origin"])
+    if fetch.returncode != 0:
+        print(
+            f"ERROR: git fetch failed, the squash commit was not confirmed locally: "
+            f"{fetch.stderr.strip()}"
+        )
+        return 1
+    record_verified_commit(root, merge_commit)
+    print(f"Recorded squash merge commit as verified: {merge_commit}")
     return 0
 
 
