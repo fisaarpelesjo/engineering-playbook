@@ -1230,6 +1230,13 @@ def verify_root(root: Path) -> CheckResult:
         result.errors.extend(attestation_workflow_errors(load_yaml(workflow_path)))
         result.add("validate-ci --branch" in workflow_text, "CI must validate branch name")
         result.add("validate-ci --pr-title" in workflow_text, "CI must validate PR title")
+        # The gate is well tested as a function; without this line the step that makes it a
+        # gate could be deleted and the suite, verify and the matrix row would all stay
+        # green while stage 4 stopped existing (T213, review finding).
+        result.add(
+            "validate-ci --pr-files" in workflow_text,
+            "CI must check that a specification claims the changed code (FR-014)",
+        )
 
     ruleset_path = root / ".github/rulesets/main.yml"
     if ruleset_path.exists():

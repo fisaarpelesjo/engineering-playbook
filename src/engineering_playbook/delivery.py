@@ -1176,6 +1176,161 @@ def command_status(args: argparse.Namespace) -> int:
     return 0
 
 
+#: Path prefixes whose contents are code in the sense FR-014 means: things that change what the
+#: software does, what the pipeline enforces, or what a derived project receives. Plain filenames
+#: are prefixes too, which is why `pyproject.toml` and `uv.lock` appear here directly.
+#:
+#: Some of these are configuration by file extension and enforcement by effect, and that is the
+#: test applied. `pyproject.toml` carries `typeCheckingMode = "strict"`, the ruff selection and
+#: pytest's `--strict-markers`: a one-line edit there weakens three of the five checks in the
+#: quality job. `.claude/settings.json` is what switches the `PreToolUse` hook on, so the hook
+#: being gated while its switch was not made the mechanism removable without a specification.
+#: `profiles/`, `templates/` and the bootstrap file are copied verbatim into every derived
+#: project by `installer.py`, so they are that product's behaviour.
+#:
+#: DELIBERATELY OUT, so the omission is a decision and not an oversight: the canonical instruction
+#: files (`ENGINEERING.md`, `AGENTS.md`, `REVIEW.md`, `docs/agents/`) change how agents are asked
+#: to behave and are not executable, and the specification's own plan/2 of the matrix treats
+#: process documentation as not constituting a control (spec 003, "Principio ordenador"). Also
+#: out: `docs/`, `.project/` bookkeeping, and the specifications themselves, which are the thing
+#: a change is supposed to be associated WITH.
+CODE_PREFIXES = (
+    "src/",
+    "scripts/",
+    "tests/",
+    "extensions/",
+    "profiles/",
+    "templates/",
+    ".claude/hooks/",
+    ".claude/settings.json",
+    ".github/workflows/",
+    ".github/rulesets/",
+    "pyproject.toml",
+    "uv.lock",
+    "bootstrap-engineering-template.yml",
+)
+
+STATE_RELATIVE = STATE_FILE.replace("\\", "/")
+
+
+def spec_precedence_refusal(
+    root: Path, changed_paths: list[str], declared_total: int | None = None
+) -> str | None:
+    """Why this pull request must not land, or None when a specification claims its code.
+
+    FR-014 / AC-010, coverage matrix stage 4. A change to code that no specification claims is a
+    change nobody wrote down a reason for, and this repository's whole premise is that the reason
+    comes first.
+
+    WHY ASSOCIATION IS MEASURED IN THE DIFF AND NOT IN THE STATE FILE. The obvious rule -- "code
+    changed, so `active_specification` must exist" -- was measured over the eight first-parent
+    commits ending at `48639d30` and would have passed all eight while measuring nothing: every
+    one declared `specs/001-engineering-playbook/spec.md`, including the commits that closed specs
+    002, 003 and 004. The field sat stale across eight slices because nothing read it. So the
+    association asked for here is one the diff can show.
+
+    WHY THE COUNT IS CROSS-CHECKED. `gh pr view --json files` returns at most 100 paths and says
+    nothing about having cut: measured against a real pull request of 167 files, it returned 100,
+    unsorted. A gate that silently measures a window would report PASS for a slice it never looked
+    at. `declared_total` is what the API says the true number is; a disagreement is a measurement
+    that did not happen, and NFR-002 makes that a refusal rather than a guess.
+
+    THE DECLARED ESCAPE, and why it is bounded. A defect fix may legitimately have no
+    specification of its own; issues #15 and #36 were exactly that, and a rule without an escape
+    would have refused both, which is how a gate gets removed instead of satisfied. So a slice may
+    write `no_spec_reason` into `.project/state.yml`. Two things keep that from becoming a silent
+    default: the reason has to be long enough to act on, and the state file has to be IN THIS
+    DIFF. Without the second, the sentence is read once by the reviewer of the pull request that
+    introduced it and then exempts every later slice forever, invisibly -- which review measured
+    as the escape's real shape before this was added.
+
+    The escape stays available even when `active_specification` is declared and valid, because
+    that is the measured case: while #15 and #36 were delivered the state still named spec 003,
+    left there by the previous slice. "No specification of its own" is about the change, not about
+    whether some specification happens to be named.
+
+    KNOWN BYPASS VECTORS, per FR-009:
+
+    * touching the specification directory is not describing the change. A scratch file under
+      `specs/NNN/` satisfies this gate. Diff-level association cannot tell the two apart; what it
+      removes is changing code while the specification says nothing at all.
+    * `no_spec_reason` can be a plausible sentence rather than a considered one. No textual rule
+      separates those; what is removed is doing it silently.
+    * `CODE_PREFIXES` is this repository's map of where code lives. A repository that grows code
+      somewhere else passes this gate while changing code, which is why the list sits next to the
+      function and why the exclusions above are written down rather than implied.
+    """
+    if declared_total is not None and declared_total != len(changed_paths):
+        return (
+            f"ERROR: the pull request reports {declared_total} changed files and only "
+            f"{len(changed_paths)} paths were handed to this check, so the specification that "
+            "claims this code was measured over a window rather than over the change. "
+            "`gh pr view --json files` caps at 100; paginate "
+            "`gh api --paginate repos/<owner>/<repo>/pulls/<n>/files`. Refusing rather than "
+            "reporting on what was not read (NFR-002)."
+        )
+
+    code_paths = sorted(path for path in changed_paths if path.startswith(CODE_PREFIXES))
+    if not code_paths:
+        return None
+
+    state_path = root / STATE_FILE
+    state: dict[str, Any] = load_yaml(state_path) if state_path.is_file() else {}
+    declared = str(state.get("active_specification") or "").replace("\\", "/")
+    # `specs/<slice>/<file>`, three components at least. Two collapse the prefix to `specs/`,
+    # and then touching ANY specification satisfies the gate -- the eight-merge defect wearing a
+    # different hat, which review built as `active_specification: specs/003-no-stage...` with no
+    # filename and watched pass.
+    parts = [part for part in declared.split("/") if part not in {"", "."}]
+    spec_dir = "/".join(parts[:-1]) + "/" if len(parts) >= 3 and parts[0] == "specs" else ""
+    if spec_dir and any(path.startswith(spec_dir) for path in changed_paths):
+        return None
+
+    reason = str(state.get("no_spec_reason") or "").strip()
+    if reason:
+        if len(reason.split()) < 5:
+            return (
+                f"ERROR: no_spec_reason is {reason!r}, which is too short to be a reason anyone "
+                "can act on. Write the sentence a reviewer would need, or associate the change "
+                "with a specification."
+            )
+        if STATE_RELATIVE not in changed_paths:
+            return (
+                f"ERROR: no_spec_reason is declared but {STATE_RELATIVE} is not in this pull "
+                "request, so the sentence was written by an earlier slice and is exempting this "
+                "one invisibly. The escape is per slice: write the reason for THIS change, in "
+                "this diff, where a reviewer reads it."
+            )
+        print(
+            f"NOTE: no specification claims this code; the state declares why: {reason!r}. "
+            "Declared escape, FR-014 -- a reviewer reads this sentence in this diff."
+        )
+        return None
+
+    changed = ", ".join(code_paths[:5]) + (" ..." if len(code_paths) > 5 else "")
+    if not declared:
+        return (
+            f"ERROR: this pull request changes code ({changed}) and {STATE_RELATIVE} declares no "
+            "active_specification. FR-014: code that no specification claims does not reach "
+            "main. Declare the specification, or declare `no_spec_reason` in this same diff."
+        )
+    if not spec_dir:
+        return (
+            f"ERROR: this pull request changes code ({changed}) and {STATE_RELATIVE} declares "
+            f"active_specification as {declared!r}, which does not name a file under "
+            "`specs/<slice>/`. A value with no filename collapses the comparison to `specs/`, "
+            "and then touching any specification at all would satisfy this gate."
+        )
+    return (
+        f"ERROR: this pull request changes code ({changed}) without touching {spec_dir}, the "
+        "directory of the active specification it declares. FR-014 asks for association, and "
+        "eight consecutive merges showed that a state field alone does not provide it -- the "
+        "field sat on specs/001 while specs 002 to 004 were being closed. Update the "
+        "specification, its plan or its tasks with what this change does, or declare "
+        f"`no_spec_reason` in {STATE_RELATIVE}, in this diff, saying why this slice has none."
+    )
+
+
 def command_validate_ci(args: argparse.Namespace) -> int:
     failed = False
     if args.branch and args.branch not in MAIN_BRANCHES and not validate_branch_name(args.branch):
@@ -1206,6 +1361,24 @@ def command_validate_ci(args: argparse.Namespace) -> int:
                         "Link the pull request to an existing, open issue."
                     )
                     failed = True
+    if getattr(args, "pr_files", None) is not None:
+        changed = [line.strip() for line in args.pr_files.splitlines() if line.strip()]
+        if not changed:
+            # An empty file list is a measurement that did not happen, not a pull request that
+            # changes nothing: `gh pr view --json files` always reports at least one path for a
+            # real pull request. NFR-002 -- refuse rather than pass.
+            print(
+                "ERROR: no changed paths were provided, so the specification that claims this "
+                "code was not measured. Refusing rather than assuming."
+            )
+            failed = True
+        else:
+            refusal = spec_precedence_refusal(
+                args.root, changed, getattr(args, "pr_file_count", None)
+            )
+            if refusal is not None:
+                print(refusal)
+                failed = True
     return 1 if failed else 0
 
 
@@ -1254,6 +1427,15 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     validate_ci.add_argument("--branch")
     validate_ci.add_argument("--pr-title")
     validate_ci.add_argument("--pr-body")
+    validate_ci.add_argument(
+        "--pr-files",
+        help="newline-separated paths the pull request changes, from `gh api --paginate`",
+    )
+    validate_ci.add_argument(
+        "--pr-file-count",
+        type=int,
+        help="how many files the pull request reports changing, to catch a truncated list",
+    )
     return parser.parse_args(argv)
 
 

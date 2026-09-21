@@ -14,6 +14,10 @@
     "active_tasks": {"type": ["string", "null"]},
     "active_task": {"type": ["string", "null"], "pattern": "^T[0-9]{3,5}$"},
     "last_checkpoint": {"type": ["string", "null"]},
+    "no_spec_reason": {
+      "type": ["string", "null"],
+      "description": "Why this slice changes code without an active specification claiming it (FR-014, T213). A declared escape, not silence: the sentence travels in the pull request and a reviewer reads it. Fewer than five words is refused."
+    },
     "last_verified_commit": {
       "type": ["string", "null"],
       "description": "Read cache of the signed verdict, for a human reading this file. Not the verdict and not a gate (spec 003 FR-007, issue #24): it is written by a commit that changes the content it names, so it cannot be required to still cover HEAD. The verdict is the attestation the quality workflow signs; `attest verify` reads it."

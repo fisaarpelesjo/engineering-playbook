@@ -58,7 +58,6 @@ MATRIX_HEADER = "| # | Etapa | Classificacao | Requisito que a cobre |"
 #: stable fragment of the stage's own text -- the pin is positional otherwise, and renumbering
 #: would silently repoint it at other stages.
 OPEN_STAGES: dict[int, tuple[str, str]] = {
-    4: ("Precedencia da especificacao", "T213"),
     6: ("Vinculo sub-issue", "T212"),
     20: ("Cadeia de rastreabilidade", "T212"),
 }
