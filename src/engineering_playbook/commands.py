@@ -111,17 +111,23 @@ def command_reconcile(root: Path, apply: bool = False) -> int:
         print(f"ERROR: git nao respondeu, portanto nada foi reconciliado: {failure}")
         return 1
     findings: list[str] = []
+    #: Reported, never fatal. A stale verdict cache is a condition the pipeline cannot avoid
+    #: producing (see below), so counting it as a finding would make this command return
+    #: non-zero on `main` forever -- the same uninformative red that issue #24 is about.
+    notes: list[str] = []
     if state.get("current_branch") != branch:
         findings.append(f"branch mismatch: state={state.get('current_branch')} git={branch}")
-    # The gate in `core.verify_root` reads `last_verified_tree`, not `last_verified_commit`
-    # (issue #30) -- only the tree survives a squash. This staleness check follows the same
-    # field so it never blocks on the commit id that FR-007 makes purely informative.
+    # Both verdict fields are a read cache now (FR-007, issue #24): the record of the verdict
+    # is written by a commit that changes the content the verdict is about, so no in-tree value
+    # can be required to still cover HEAD. This reports the drift and does not fail on it; the
+    # verdict that gates is the signed attestation `delivery.signed_verdict_refusal` checks.
     #
     # Issue #10: this used to compare only against HEAD's own tree, stricter than `verify_root`,
     # which also accepts a parent of HEAD (a PR merge ref -- see `git_parents`'s docstring). The
-    # two readers of `last_verified_tree` must agree on what it means, so this now calls the
-    # exact same `accepted_verified_trees` predicate `verify_root` gates on, rather than a
-    # second, narrower copy of the comparison.
+    # two readers of `last_verified_tree` must agree on what it means, so this calls the exact
+    # same `accepted_verified_trees` predicate `verify_root` reports on, rather than a second,
+    # narrower copy of the comparison. Neither of them GATES on it any more (FR-007): they agree
+    # about what the cache covers, and both only report when it no longer covers HEAD.
     try:
         head_tree = git_tree(root, head)
         accepted_trees = accepted_verified_trees(root)
@@ -129,10 +135,13 @@ def command_reconcile(root: Path, apply: bool = False) -> int:
         print(f"ERROR: git nao respondeu, portanto a tree de HEAD nao foi medida: {failure}")
         return 1
     if state.get("last_verified_tree") not in {None, *accepted_trees}:
-        findings.append(
-            f"stale verified tree: state={state.get('last_verified_tree')} git={head_tree} "
-            f"(nem HEAD nem um pai de HEAD)"
+        notes.append(
+            f"stale verdict cache: state={state.get('last_verified_tree')} git={head_tree} "
+            f"(nem HEAD nem um pai de HEAD). FR-007: o veredicto e a attestation assinada, "
+            f"nao este campo -- `attest verify` responde sobre este conteudo."
         )
+    for note in notes:
+        print(f"NOTE: {note}")
     if not findings:
         print("OK")
         return 0

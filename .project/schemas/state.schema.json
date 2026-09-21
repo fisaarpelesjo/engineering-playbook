@@ -14,8 +14,14 @@
     "active_tasks": {"type": ["string", "null"]},
     "active_task": {"type": ["string", "null"], "pattern": "^T[0-9]{3,5}$"},
     "last_checkpoint": {"type": ["string", "null"]},
-    "last_verified_commit": {"type": ["string", "null"]},
-    "last_verified_tree": {"type": ["string", "null"]},
+    "last_verified_commit": {
+      "type": ["string", "null"],
+      "description": "Read cache of the signed verdict, for a human reading this file. Not the verdict and not a gate (spec 003 FR-007, issue #24): it is written by a commit that changes the content it names, so it cannot be required to still cover HEAD. The verdict is the attestation the quality workflow signs; `attest verify` reads it."
+    },
+    "last_verified_tree": {
+      "type": ["string", "null"],
+      "description": "Read cache of the signed verdict, as a git tree id. Same status as last_verified_commit: reported when stale, gating nothing. A derived project declaring `ci: none` has no workflow identity and keeps the commit/ancestry mechanism instead (FR-020)."
+    },
     "validation": {
       "type": "object",
       "required": ["passed", "failed", "not_run"],

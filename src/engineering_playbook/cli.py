@@ -5,6 +5,7 @@ import sys
 from pathlib import Path
 
 from . import __version__
+from .attestation import command_attest_subject, command_attest_verify
 from .commands import (
     command_checkpoint,
     command_doctor,
@@ -67,6 +68,27 @@ def build_parser() -> argparse.ArgumentParser:
     )
     add_root(subparsers.add_parser("migrate"))
 
+    # The signed verdict (spec 003 FR-006/FR-007, issue #24). `subject` is what the workflow
+    # runs before `actions/attest-build-provenance`; `verify` is what anyone -- the delivery
+    # pipeline, a reviewer, a third party with no access to `.project/state.yml` -- runs to ask
+    # whether this content has a verdict signed by the workflow identity (AC-004).
+    attest = add_root(
+        subparsers.add_parser(
+            "attest",
+            help="Write or verify the signed conformance verdict for the current content.",
+        )
+    )
+    attest_commands = attest.add_subparsers(dest="attest_command", required=True)
+    attest_subject = attest_commands.add_parser(
+        "subject", help="Write the file whose digest the workflow attests."
+    )
+    attest_subject.add_argument("--out", type=Path, required=True)
+    attest_subject.add_argument("--ref", default="HEAD")
+    attest_verify = attest_commands.add_parser(
+        "verify", help="Check that a signed verdict covers this content (requires gh)."
+    )
+    attest_verify.add_argument("--ref", default="HEAD")
+
     subparsers.add_parser("delivery", help="Run the safe Git delivery pipeline.")
     subparsers.add_parser(
         "local-ci",
@@ -112,6 +134,10 @@ def main(argv: list[str] | None = None) -> int:
         return command_checkpoint(root, allow_divergent=args.allow_divergent)
     if args.command == "migrate":
         return command_migrate(root)
+    if args.command == "attest":
+        if args.attest_command == "subject":
+            return command_attest_subject(root, args.out, args.ref)
+        return command_attest_verify(root, args.ref)
     if args.command == "version":
         print(__version__)
         return 0

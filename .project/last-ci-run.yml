@@ -1,10 +1,12 @@
 # Escrito por scripts/local_ci.py. NAO editar a mao.
 # Diz contra QUE COMMIT esta corrida rodou -- um verde aqui nao vale para outro HEAD.
+# 'tree' sobrevive a um squash (issue #9); 'head' sozinho nao.
 schema_version: 1
 kind: local_ci_receipt
-ran_at: '2026-09-20T19:57:42Z'
-head: '8da9f50aa9d4bf244785cdcf2f9f1614be122313'
-head_before_run: '8da9f50aa9d4bf244785cdcf2f9f1614be122313'
+ran_at: '2026-09-21T02:08:10Z'
+head: '0a07c59ae373dc646a817ac0ce0a375515c47c4f'
+tree: '1ddfcf0eba1f0f19f6d8048516caafd2104be036'
+head_before_run: '0a07c59ae373dc646a817ac0ce0a375515c47c4f'
 tree_was_dirty_before_run: true
 tree_changed_during_run: false
 tree_was_dirty: true
