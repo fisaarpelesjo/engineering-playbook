@@ -99,7 +99,7 @@ Esta matriz e lida por instrumento, nao por leitor: `tests/unit/test_coverage_ma
 | 1 | Validacao do PRD por instrumento | CI | coberta, `core.validate_prd_document` em `src/engineering_playbook/core.py`, `tests/unit/test_core.py` |
 | 2 | Existencia de especificacao, plano e tarefas referenciados pelo estado | CI | coberta, `core.verify_root` (State reference missing), `tests/unit/test_core.py` |
 | 3 | Unicidade de identificadores de tarefa em `specs/*` | CI | coberta, spec 002, `core.verify_root`, `tests/unit/test_core.py` |
-| 4 | Precedencia da especificacao sobre o codigo | ausente | FR-014, AC-010, fecha com T213 |
+| 4 | Precedencia da especificacao sobre o codigo | CI | coberta, T213, `src/engineering_playbook/delivery.py` (`spec_precedence_refusal`), `.github/workflows/quality.yml`, `tests/unit/test_code_names_its_spec.py`: pull request que altera codigo toca o directorio da especificacao activa, ou declara `no_spec_reason` no estado. Associacao medida no diff e nao no campo de estado, que esteve desactualizado nos 8 commits de primeiro progenitor ate `48639d30`. Limites declarados: tocar o directorio nao e descrever a mudanca, e a lista de caminhos vem paginada com verificacao de truncagem. Refs: FR-014, AC-010 |
 | 5 | Issue aberta previamente a entrega | CI | coberta, spec 002, `delivery.issue_is_open`, `tests/unit/test_issue_gate.py` |
 | 6 | Vinculo sub-issue para issue mae e issue mae para especificacao | ausente | FR-015, AC-009, fecha com T212 |
 | 7 | Conformidade do nome de branch | CI | coberta, `delivery.validate_branch_name`, `tests/unit/test_core.py` |

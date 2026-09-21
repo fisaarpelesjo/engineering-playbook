@@ -54,6 +54,26 @@ jobs:
         run: |
           PR_BODY="$(gh pr view "$PR_NUMBER" --json body --jq .body)"
           uv run python scripts/delivery.py validate-ci --pr-body "$PR_BODY"
+      # FR-014 / AC-010: code that no specification claims does not reach main. The changed
+      # paths come from the API rather than from `git diff`, because the checkout above is
+      # `fetch-depth: 2` and does not reach the base of a branch with more than one commit --
+      # measured, not assumed. Same shape as the "Closes issue" step: `gh` reads, the value
+      # travels through `env`, and the rule lives in Python where it is testable.
+      - name: Specification claims this code
+        if: github.event_name == 'pull_request'
+        # Paginated on purpose. `gh pr view --json files` caps at 100 paths and says nothing
+        # about having cut: measured against a real pull request of 167 changed files, it
+        # returned 100, unsorted. A gate reporting on a window it did not know it was looking
+        # through is the silent-truncation defect, so the true count travels alongside and the
+        # Python side refuses when the two disagree (NFR-002).
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          REPO: ${{ github.repository }}
+        run: |
+          PR_FILES="$(gh api --paginate "repos/$REPO/pulls/$PR_NUMBER/files" --jq '.[].path')"
+          PR_COUNT="$(gh api "repos/$REPO/pulls/$PR_NUMBER" --jq '.changed_files')"
+          uv run python scripts/delivery.py validate-ci --pr-files "$PR_FILES" --pr-file-count "$PR_COUNT"
       - name: Convergence
         run: uv run python scripts/verify.py
   quality:
