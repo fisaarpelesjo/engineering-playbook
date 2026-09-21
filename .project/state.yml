@@ -1,5 +1,5 @@
 schema_version: 1.0.0
-updated_at: '2026-09-21T01:57:50Z'
+updated_at: '2026-09-21T02:06:03Z'
 active_workstream: WS-001
 current_branch: feat/004-the-pipeline-state
 issue: 11
@@ -9,8 +9,8 @@ active_specification: specs/001-engineering-playbook/spec.md
 active_plan: specs/001-engineering-playbook/plan.md
 active_tasks: specs/001-engineering-playbook/tasks.md
 active_task: T017
-last_checkpoint: .project/checkpoints/CP-20260921-3043bded.yml
-last_verified_commit: 1d9890b7176678856e979689097cc1e304ce4c9b
+last_checkpoint: .project/checkpoints/CP-20260921-dbe06fa2.yml
+last_verified_commit: 9bd3ccbaa4da940c4e4de9d2e6aa6db7a52f737b
 validation:
   passed:
   - uv sync --locked
@@ -38,4 +38,4 @@ delivery:
   pr_number: 29
   pr_url: https://github.com/fisaarpelesjo/engineering-playbook/pull/29
   updated_at: '2026-09-20T19:57:46Z'
-last_verified_tree: 78360430f33b36f48855d0d7b8c59c777a8a52ac
+last_verified_tree: ee328207416c4894d59d1d14b138e423dc20596d
