@@ -60,7 +60,6 @@ MATRIX_HEADER = "| # | Etapa | Classificacao | Requisito que a cobre |"
 OPEN_STAGES: dict[int, tuple[str, str]] = {
     4: ("Precedencia da especificacao", "T213"),
     6: ("Vinculo sub-issue", "T212"),
-    16: ("Caso ignorado", "T210"),
     20: ("Cadeia de rastreabilidade", "T212"),
 }
 
