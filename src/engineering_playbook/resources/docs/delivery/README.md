@@ -20,7 +20,7 @@ uv run python scripts/delivery.py merge --auto --yes-remote
 
 ## Gates
 
-- `start` valida nome da branch e recusa arvore suja sem `--allow-dirty`.
+- `start` valida nome da branch, recusa arvore suja sem `--allow-dirty`, e recusa partir de um HEAD que a base ainda nao contem -- depois de um squash merge o HEAD local carrega commits que `main` absorveu sob outra identidade, e uma branch criada ai nasce em conflito. Repita com `--from-base` para partir de `origin/main` mantendo as alteracoes por commitar, ou com `--allow-unmerged-head` apenas para empilhar deliberadamente sobre fatia ainda por integrar (issue #36).
 - `prepare` exige branch diferente de `main`, executa verificacoes locais, revisao somente leitura, checkpoint e gera `.project/delivery/prepare.yml` mais `.project/delivery/pr.md`.
 - `commit` exige prepare aprovado e atual, staged files, Conventional Commit, scan basico de secrets e ownership.
 - `publish` exige commit local valido, branch diferente de `main`, checkpoint antes de remoto, push sem force e PR via GitHub CLI.

@@ -102,7 +102,7 @@ a pull request e requisito do ruleset. `parcial`: mecanismo presente com vetor d
 | 6 | Vinculo sub-issue para issue mae e issue mae para especificacao | ausente | FR-015, AC-009 |
 | 7 | Conformidade do nome de branch | CI | coberta |
 | 8 | Proibicao de commit originado na branch por omissao | servidor | coberta |
-| 9 | Ordem `start`, `prepare`, `commit`, `publish`, `merge` | parcial | FR-005, AC-003 |
+| 9 | Ordem `start`, `prepare`, `commit`, `publish`, `merge` | parcial | FR-005, AC-003. T218 acrescentou a precondicao de `start`: recusa partir de HEAD que a base nao contem, com `--from-base` como saida. Permanece parcial porque `publish` e `merge` ainda nao verificam recibo do antecessor, e porque `--base` tem dois referentes entre comandos (T219) |
 | 10 | Formatacao, analise estatica, tipos e testes | servidor | coberta |
 | 11 | Schemas, distribuicao e fixacao de Actions por SHA | CI | coberta |
 | 12 | Pull request obrigatoria, estrategia squash, proibicao de force push | servidor | coberta |
@@ -111,7 +111,7 @@ a pull request e requisito do ruleset. `parcial`: mecanismo presente com vetor d
 | 15 | Emissao do veredicto de conformidade | CI | coberta, T208/T209: attestation assinada pela identidade OIDC da execucao, emitida em job proprio que depende das duas baterias; `last_verified_commit` e `last_verified_tree` reclassificados como cache de leitura |
 | 16 | Caso ignorado nao computado como aprovacao | ausente | FR-008, AC-005 |
 | 17 | Verificacao do veredicto antes da integracao | parcial, controlo no cliente | FR-006. `delivery.py merge` mede a tree do head remoto da pull request e recusa sem veredicto assinado, mas e passo de comando local: integracao pela interface do GitHub nao o atravessa. Ver vectores de bypass abaixo |
-| 18 | Sujeicao do agente automatizado ao pipeline | ausente | FR-011, AC-007 |
+| 18 | Sujeicao do agente automatizado ao pipeline | parcial, alcance limitado a estacao configurada | coberta em parte, T205: `.claude/hooks/enforce_delivery_pipeline.py` rejeita `commit|push|merge|rebase|reset` anteriormente a execucao da ferramenta, com teste em `tests/unit/test_delivery_pipeline_hook.py`. Medido em 2026-09-21: nao cobre `switch`, `checkout -b` nem `branch`, portanto a criacao de branch fora da esteira nao e apanhada (T221). FR-012: fora da estacao configurada, nada disto vigora |
 | 19 | Neutralizacao de injeccao de shell via titulo de pull request | CI | coberta, spec 002 |
 | 20 | Cadeia de rastreabilidade entre pull request e PRD | ausente | FR-013 |
 
@@ -131,6 +131,7 @@ vectores estao enumerados, nao que sejam os unicos.
 | Attestation emitida em runner self-hosted | fechado | `--deny-self-hosted-runners` na verificacao |
 | Attestation de outro repositorio ou de outro caminho de workflow | fechado | `--repo` e `--signer-workflow` na verificacao. Limite: num clone cujo `origin` aponte para um fork, o slug medido e o do fork |
 | Repositorio privado, que nao pode emitir veredicto | nao aplicavel, declarado | `attestation.repository_identity` mede a visibilidade e o portao nao se aplica; o projecto mantem o mecanismo de commit e ancestralidade. Sem esta medicao o portao seria impossivel de satisfazer, e portao impossivel e portao removido |
+| Criacao de branch fora da esteira (`git switch -c`, `git checkout -b`, `git branch`) | aberto | Medido contra `.claude/hooks/enforce_delivery_pipeline.py` em 2026-09-21: `WRITE_VERB` cobre `commit|push|merge|rebase|reset` e `branch` esta na lista de leitura. Fecha com T221, que depende de T218 ter dado ao operador `--from-base` |
 
 ## Exclusoes de escopo
 
