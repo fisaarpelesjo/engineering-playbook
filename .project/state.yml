@@ -10,7 +10,7 @@ active_plan: specs/001-engineering-playbook/plan.md
 active_tasks: specs/001-engineering-playbook/tasks.md
 active_task: T017
 last_checkpoint: .project/checkpoints/CP-20260921-3043bded.yml
-last_verified_commit: 749ba61757a64fa0379953917bc09b7a9b8423aa
+last_verified_commit: 1d9890b7176678856e979689097cc1e304ce4c9b
 validation:
   passed:
   - uv sync --locked
@@ -38,4 +38,4 @@ delivery:
   pr_number: 29
   pr_url: https://github.com/fisaarpelesjo/engineering-playbook/pull/29
   updated_at: '2026-09-20T19:57:46Z'
-last_verified_tree: 946bc02a9667c23ce2ed3518db9a0828a7b22e24
+last_verified_tree: 78360430f33b36f48855d0d7b8c59c777a8a52ac
