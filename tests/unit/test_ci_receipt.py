@@ -159,6 +159,72 @@ def test_a_full_green_receipt_for_this_head_covers(tmp_path: Path) -> None:
     assert check.reason is None
 
 
+def test_a_receipt_recorded_before_a_squash_still_covers_after_it(tmp_path: Path) -> None:
+    """Issue #9: `head` is the branch SHA a squash replaces with a brand-new commit id for
+    identical content -- only `tree` survives that. Forges the exact object a squash produces
+    with `git commit-tree`, no GitHub round trip, mirroring
+    `tests/unit/test_tree_survives_the_squash.py`'s `repo_with_a_squashed_branch`.
+    """
+    root = tmp_path / "repo"
+    root.mkdir(parents=True)
+    subprocess.run(["git", "init", "-q", "-b", "main"], cwd=root, check=True)
+    subprocess.run(["git", "config", "user.email", "test@example.com"], cwd=root, check=True)
+    subprocess.run(["git", "config", "user.name", "Test"], cwd=root, check=True)
+    (root / "a.txt").write_text("base\n", encoding="utf-8")
+    subprocess.run(["git", "add", "-A"], cwd=root, check=True)
+    subprocess.run(["git", "commit", "-qm", "base"], cwd=root, check=True)
+    base_sha = subprocess.run(
+        ["git", "rev-parse", "HEAD"], cwd=root, check=True, capture_output=True, text=True
+    ).stdout.strip()
+
+    subprocess.run(["git", "switch", "-qc", "feat/1"], cwd=root, check=True)
+    (root / "b.txt").write_text("feature\n", encoding="utf-8")
+    subprocess.run(["git", "add", "-A"], cwd=root, check=True)
+    subprocess.run(["git", "commit", "-qm", "feature"], cwd=root, check=True)
+    branch_tip = subprocess.run(
+        ["git", "rev-parse", "HEAD"], cwd=root, check=True, capture_output=True, text=True
+    ).stdout.strip()
+    branch_tree = subprocess.run(
+        ["git", "rev-parse", f"{branch_tip}^{{tree}}"],
+        cwd=root,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+
+    # Forge the squash GitHub would have created: a NEW commit id, parented on the pre-branch
+    # `main` tip, carrying the branch's tree verbatim.
+    squashed_head = subprocess.run(
+        ["git", "commit-tree", branch_tree, "-p", base_sha, "-m", "squash: feature"],
+        cwd=root,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    subprocess.run(["git", "switch", "-q", "main"], cwd=root, check=True)
+    subprocess.run(["git", "reset", "-q", "--hard", squashed_head], cwd=root, check=True)
+
+    write_receipt(root, full_green_receipt(branch_tip, tree=branch_tree))
+
+    check = check_ci_receipt(root, squashed_head)
+
+    assert check.status is CiReceiptStatus.COVERS, (
+        f"a receipt whose tree matches the squashed HEAD was not recognised: {check.reason}"
+    )
+
+
+def test_a_receipt_with_no_tree_field_still_reads_stale_on_a_commit_mismatch(
+    tmp_path: Path,
+) -> None:
+    """The fallback must not paper over a genuinely different commit: without a `tree` to fall
+    back to, a commit mismatch stays STALE exactly as it did before issue #9.
+    """
+    write_receipt(tmp_path, full_green_receipt("other-commit"))
+    check = check_ci_receipt(tmp_path, "current-head")
+    assert check.status is CiReceiptStatus.STALE
+    assert "nao registra 'tree'" in (check.reason or "")
+
+
 # --- check_ci_receipt: STALE, one test per concrete reason ------------------------------------
 
 

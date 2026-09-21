@@ -413,6 +413,22 @@ def git_tree(root: Path, ref: str) -> str:
     return git_capture(root, "rev-parse", "--verify", f"{ref}^{{tree}}")
 
 
+def accepted_verified_trees(root: Path) -> set[str]:
+    """The trees a recorded verdict may name and still count as covering HEAD right now.
+
+    HEAD's own tree, plus the tree of every parent of HEAD -- see `git_parents`'s docstring for
+    why a parent matters (a PR's merge ref) and `git_tree`'s for why a tree, not a commit id,
+    is what a squash leaves intact (issue #9/#30).
+
+    THE ONE PLACE this predicate is decided: `verify_root` (the CI-only gate on
+    `last_verified_tree`), `command_reconcile` (the staleness finding on the same field) and
+    `check_ci_receipt` (the CI receipt's `tree`) all call this instead of comparing trees
+    inline. Issue #10 was exactly two readers of the same field computing this differently and
+    disagreeing; a second inline copy of this set would only recreate it.
+    """
+    return {git_tree(root, "HEAD")} | {git_tree(root, parent) for parent in git_parents(root)}
+
+
 def git_status(root: Path) -> list[str]:
     output = git_capture(root, "status", "--short")
     return [line for line in output.splitlines() if line.strip()]
@@ -907,6 +923,19 @@ def verify_root(root: Path) -> CheckResult:
             # `ci: none` has no Actions workflow, therefore no workflow identity to trust
             # even at this reduced level. Those projects keep the pre-existing
             # commit/ancestry mechanism unchanged below.
+            #
+            # ONE PREDICATE, THREE READERS (issue #10): `accepted_verified_trees` below is the
+            # only place "which trees still count as HEAD" is decided. `command_reconcile`
+            # (commands.py) and `check_ci_receipt` (receipt.py, issue #9's CI receipt) call the
+            # same function rather than each inlining their own comparison -- two readers of
+            # `last_verified_tree` computing this differently is exactly how #10 happened.
+            # COVERAGE, stated plainly: this predicate proves the recorded tree is reachable as
+            # HEAD or a parent of HEAD RIGHT NOW, on THIS checkout. It does not prove the
+            # tree was ever actually built or tested by anyone -- that is what
+            # `last_verified_commit`/`last_verified_tree` being written and read by the same
+            # actor still does not give FR-006 (declared above), and what the CI receipt's own
+            # `tree` field does not give either: a receipt is self-reported by the same run
+            # that measured it, not attested by a third party.
             if derived_ci_none:
                 try:
                     accepted_commits = {git_head(root), *git_parents(root)}
@@ -923,8 +952,7 @@ def verify_root(root: Path) -> CheckResult:
                     )
             else:
                 try:
-                    accepted_trees = {git_tree(root, "HEAD")}
-                    accepted_trees.update(git_tree(root, parent) for parent in git_parents(root))
+                    accepted_trees = accepted_verified_trees(root)
                 except GitUnavailableError as failure:
                     result.errors.append(
                         f"git nao respondeu, portanto last_verified_tree nao foi comparado: "

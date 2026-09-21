@@ -14,6 +14,7 @@ from __future__ import annotations
 import subprocess
 from pathlib import Path
 
+from engineering_playbook.commands import command_reconcile
 from engineering_playbook.core import verify_root, write_yaml_atomic
 
 STATE_FILE = ".project/state.yml"
@@ -144,4 +145,61 @@ def test_derived_project_without_ci_keeps_the_commit_based_gate(tmp_path: Path) 
 
     assert any("last_verified_commit" in error for error in result.errors), (
         f"a ci:none derived project stopped using the commit-based gate: {result.errors}"
+    )
+
+
+def test_reconcile_agrees_with_verify_root_on_a_tree_verified_on_a_merged_parent(
+    tmp_path: Path,
+) -> None:
+    """Issue #10: `verify_root` accepts HEAD's tree OR the tree of any parent of HEAD (a PR's
+    merge ref); `command_reconcile` used to accept only HEAD's own tree. Builds a real merge
+    commit whose OWN tree differs from both parents' (main moved on after the branch point, so
+    the merge combines all three files) and records the verdict against the branch tip that
+    became one of that merge's parents -- the exact state the two readers used to disagree on.
+    """
+    root = tmp_path / "repo"
+    root.mkdir(parents=True)
+    git(root, "init", "-q", "-b", "main")
+    git(root, "config", "user.email", "test@example.com")
+    git(root, "config", "user.name", "Test")
+    (root / "a.txt").write_text("base\n", encoding="utf-8")
+    git(root, "add", "-A")
+    git(root, "commit", "-qm", "base")
+
+    git(root, "switch", "-qc", "feat/1")
+    (root / "b.txt").write_text("feature\n", encoding="utf-8")
+    git(root, "add", "-A")
+    git(root, "commit", "-qm", "feature")
+    branch_tip = git(root, "rev-parse", "HEAD")
+    branch_tree = git(root, "rev-parse", f"{branch_tip}^{{tree}}")
+
+    git(root, "switch", "-q", "main")
+    (root / "c.txt").write_text("main-only\n", encoding="utf-8")
+    git(root, "add", "-A")
+    git(root, "commit", "-qm", "main moved on")
+
+    git(root, "merge", "--no-ff", "-q", "-m", "merge feature", branch_tip)
+    head_tree = git(root, "rev-parse", "HEAD^{tree}")
+    assert head_tree != branch_tree, (
+        "sanity check: HEAD's own tree must differ from the verified tree, or this is not "
+        "exercising the parent-tree path at all"
+    )
+
+    write_state(
+        root,
+        current_branch="main",
+        last_verified_commit=branch_tip,
+        last_verified_tree=branch_tree,
+    )
+
+    verify_errors = [
+        error for error in verify_root(root).errors if "Verified/converged state requires" in error
+    ]
+    reconcile_exit = command_reconcile(root)
+
+    assert verify_errors == [], (
+        f"verify_root rejected a tree that matches a parent of HEAD: {verify_errors}"
+    )
+    assert reconcile_exit == 0, (
+        "reconcile disagreed with verify_root about the exact same state -- issue #10"
     )
