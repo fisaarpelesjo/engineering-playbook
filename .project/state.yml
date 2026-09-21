@@ -1,15 +1,15 @@
 schema_version: 1.0.0
-updated_at: '2026-09-21T21:19:05Z'
+updated_at: '2026-09-21T22:23:40Z'
 active_workstream: WS-001
-current_branch: fix/051-one-base-one-meaning
-issue: 51
+current_branch: feat/052-the-override-leaves-a-trace
+issue: 52
 current_phase: implement
 status: in_progress
 active_specification: specs/003-no-stage-without-a-mechanism/spec.md
 active_plan: specs/003-no-stage-without-a-mechanism/plan.md
 active_tasks: specs/003-no-stage-without-a-mechanism/tasks.md
-active_task: T219
-last_checkpoint: .project/checkpoints/CP-20260921-14238e5c.yml
+active_task: T220
+last_checkpoint: .project/checkpoints/CP-20260921-032380ac.yml
 last_verified_commit: 48639d309ec5fffa78082e655afddd999282a29f
 validation:
   passed:
@@ -32,10 +32,10 @@ blockers: []
 next_actions:
 - Retomar com uv run python scripts/resume.py antes de novas mudancas.
 delivery:
-  branch: feat/055-the-chain-is-verified
+  branch: feat/052-the-override-leaves-a-trace
   base: main
   remote: origin
-  pr_number: 58
-  pr_url: https://github.com/fisaarpelesjo/engineering-playbook/pull/58
-  updated_at: '2026-09-21T21:02:00Z'
+  pr_number: 60
+  pr_url: https://github.com/fisaarpelesjo/engineering-playbook/pull/60
+  updated_at: '2026-09-21T21:47:59Z'
 last_verified_tree: 1ddfcf0eba1f0f19f6d8048516caafd2104be036
