@@ -86,6 +86,7 @@ VERDICT = "tests/unit/test_signed_verdict_leaves_the_tree.py"
 SKIPS = "tests/unit/test_a_skip_is_declared.py"
 MATRIX = "tests/unit/test_coverage_matrix_is_measured.py"
 BASE = "tests/unit/test_one_base_one_meaning.py"
+ORIGIN = "tests/unit/test_the_override_leaves_a_trace.py"
 
 # Long source fragments, named so the entries stay readable and the literals stay exact.
 BASE_CONTAINS_HEAD = '    if unmerged == "0":\n        return None'
@@ -120,6 +121,7 @@ SKIP_STALE = "    for nodeid in sorted(set(declared) - set(observed)):"
 #: No stage reads `ausente` any more -- AC-011 is satisfied -- so the fraud this mutation plants
 #: is the next one along: promoting a `parcial` stage to a closed classification by editing the
 #: word, which the PARTIAL_STAGES pin exists to refuse.
+ORIGIN_RECORDED = "    record_branch_origin(\n"
 REMOTE_REF_WINS = "    if git_ref_exists(root, remote_ref):\n        return remote_ref"
 HOOK_SEES_BRANCHES = "    if BRANCH_CREATION.search(command) or BRANCH_WRITE.search(command):"
 STAGE_TWENTY_PARTIAL = (
@@ -272,6 +274,15 @@ MUTATIONS: tuple[Mutation, ...] = (
         find=HOOK_SEES_BRANCHES,
         replace="    if False:",
         proves=(f"{BASE}::test_branch_writes_are_refused[git switch -c feat/001-x]",),
+    ),
+    Mutation(
+        mechanism="a branch records how it came to exist",
+        requirement="FR-009, FR-012, T220",
+        stage=9,
+        file=DELIVERY,
+        find=ORIGIN_RECORDED,
+        replace="    if False:\n        record_branch_origin(\n",
+        proves=(f"{ORIGIN}::test_the_override_is_recorded_where_an_instrument_reads_it",),
     ),
     Mutation(
         mechanism="an undeclared skip fails the run",

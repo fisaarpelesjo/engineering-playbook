@@ -569,6 +569,37 @@ def unmerged_base_refusal(root: Path, remote: str, base: str) -> str | None:
     )
 
 
+ORIGIN_FILE = ".project/delivery/branch-origin.yml"
+
+
+def record_branch_origin(root: Path, branch: str, base_ref: str, override: str | None) -> None:
+    """Write how this branch came to exist, so a later reader does not have to take it on trust.
+
+    T220 / FR-009 / FR-012. `--allow-unmerged-head` printed a warning and nothing else. The
+    warning lived in the terminal of whoever ran the command; nothing reached
+    `.project/delivery/`, so an audit -- or the next stage of this same pipeline -- could not tell
+    that a branch had been created under an exception.
+
+    Everything else in this pipeline leaves a record that an instrument can read: `prepare` writes
+    its receipt, `checkpoint` writes its own, the state carries the verdict cache, CI writes the
+    run receipt. This was the one step whose exception existed only as words on a screen.
+
+    WRITTEN: by `start`, once, immediately after the branch exists.
+    INVALIDATED: by the next `start`, which overwrites it. The file describes the branch currently
+    being worked on and makes no claim about any earlier one -- `.project/delivery/` is git-ignored
+    scratch, so this is a record for the operator and the pipeline, not a history.
+    """
+    write_yaml_atomic(
+        root / ORIGIN_FILE,
+        {
+            "branch": branch,
+            "base_ref": base_ref,
+            "override": override,
+            "created_at": utc_now(),
+        },
+    )
+
+
 def command_start(args: argparse.Namespace) -> int:
     branch = build_branch_name(args.type, args.number, args.slug)
     if git_status(args.root) and not args.allow_dirty:
@@ -606,6 +637,13 @@ def command_start(args: argparse.Namespace) -> int:
     if completed.returncode != 0:
         print(completed.stderr.strip())
         return completed.returncode
+    override = "allow-unmerged-head" if args.allow_unmerged_head else None
+    record_branch_origin(
+        args.root,
+        branch,
+        base_ref_name(args.remote, args.base) if args.from_base else "HEAD",
+        override,
+    )
     print(branch)
     return 0
 
@@ -1187,6 +1225,13 @@ def command_status(args: argparse.Namespace) -> int:
     except GitUnavailableError as failure:
         print(f"branch: unmeasured (git did not answer: {failure})")
     print(f"prepare: {reason}")
+    if (args.root / ORIGIN_FILE).exists():
+        origin = load_yaml(args.root / ORIGIN_FILE)
+        override = origin.get("override")
+        print(f"branch_from: {origin.get('base_ref', 'unknown')}")
+        # Printed whichever way it went. An exception that only shows up when it was used reads,
+        # to anyone scanning output, exactly like a line somebody forgot to look for.
+        print(f"branch_override: {override or 'none'}")
     if (args.root / PREPARE_FILE).exists():
         prepare = load_yaml(args.root / PREPARE_FILE)
         print(f"reviewer: {prepare.get('review', 'unknown')}")
