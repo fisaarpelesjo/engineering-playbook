@@ -76,7 +76,12 @@ jobs:
           PR_NUMBER: ${{ github.event.pull_request.number }}
           REPO: ${{ github.repository }}
         run: |
-          PR_FILES="$(gh api --paginate "repos/$REPO/pulls/$PR_NUMBER/files" --jq '.[].path')"
+          # `.filename`, not `.path`: the REST endpoint names the field `filename`, while
+          # `gh pr view --json files` normalises it to `path`. Swapping one for the other to fix
+          # the 100-file cap kept the old field name, every line came back empty, and the
+          # empty-list guard refused twice before this line was right (runs 35641532687 and
+          # 35642618171). Fail-closed earned its keep.
+          PR_FILES="$(gh api --paginate "repos/$REPO/pulls/$PR_NUMBER/files" --jq '.[].filename')"
           PR_COUNT="$(gh api "repos/$REPO/pulls/$PR_NUMBER" --jq '.changed_files')"
           uv run python scripts/delivery.py validate-ci --pr-files "$PR_FILES" --pr-file-count "$PR_COUNT"
       - name: Convergence

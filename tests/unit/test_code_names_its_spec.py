@@ -289,3 +289,26 @@ def test_the_files_that_decide_what_ci_enforces_are_gated(tmp_path: Path) -> Non
 
     for path in ["pyproject.toml", "uv.lock", ".claude/settings.json", "profiles/workflows/x.yml"]:
         assert spec_precedence_refusal(root, [path]) is not None, f"{path} is not gated"
+
+
+def test_the_workflow_reads_the_field_the_api_actually_returns() -> None:
+    """The wiring that broke twice, pinned.
+
+    `gh pr view --json files` normalises the field to `path`; the REST endpoint
+    `pulls/<n>/files` names it `filename`. Swapping one for the other to lift the 100-file cap
+    kept `.path`, so every line came back empty and the gate refused twice (runs 35641532687 and
+    35642618171) before the filter was right. The Python side cannot see this -- it only receives
+    whatever the shell produced -- so the assertion belongs here.
+    """
+    workflow = (Path(__file__).resolve().parents[2] / ".github/workflows/quality.yml").read_text(
+        encoding="utf-8"
+    )
+    # Anchored on the step declaration, not on the phrase: the same words appear in the comment
+    # that explains why the job needs `pull-requests: read`, and splitting there read the
+    # permissions block instead of the step.
+    step = workflow.split("- name: Specification claims this code", 1)[1].split("- name:", 1)[0]
+
+    assert "pulls/$PR_NUMBER/files" in step, "the step stopped using the paginated endpoint"
+    assert ".[].filename" in step, (
+        "the REST endpoint returns `filename`; `.path` yields empty lines for every file"
+    )
