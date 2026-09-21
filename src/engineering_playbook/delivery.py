@@ -210,6 +210,37 @@ def issue_is_open(root: Path, number: int) -> bool:
     return data.get("state") == "OPEN"
 
 
+def resolve_base(root: Path, remote: str, base: str) -> str:
+    """THE one place `--base` is turned into a ref, for every command that reads it.
+
+    T219 / FR-005. Measured on 2026-09-21, in this repository, on a branch whose work was already
+    integrated:
+
+        git rev-list --count HEAD ^refs/heads/main            -> 8
+        git rev-list --count HEAD ^refs/remotes/origin/main   -> 0
+
+    Same flag, same default value, two answers. `start` resolved `refs/remotes/<remote>/<base>`
+    and refused correctly; `publish` and `status` resolved `refs/heads/<base>` and would have
+    reported eight commits as unpublished that the base on the server already had. It is the same
+    defect as #36 seen from the other side: a command reasoning about a reference that is not the
+    one the server will use.
+
+    WHICH ONE WINS, and why. The remote ref, when it exists. Integration happens on the server, so
+    the base that matters is the server's -- `refs/heads/<base>` is whatever this checkout last
+    did locally, which after a squash merge is routinely behind and, in a worktree that never
+    checks `main` out, may not exist at all.
+
+    THE FALLBACK IS DECLARED, not silent: with no remote-tracking ref, the local branch is used,
+    because a repository that has never fetched has nothing better and refusing every command
+    there would be worse than answering from what is present. `start` is the exception and refuses
+    instead, because creating a branch from an unmeasured base is the defect #36 recorded.
+    """
+    remote_ref = f"refs/remotes/{remote}/{base}"
+    if git_ref_exists(root, remote_ref):
+        return remote_ref
+    return base
+
+
 def local_commits(root: Path, base: str = "main") -> list[str]:
     """Commits on HEAD that `base` does not have yet.
 
@@ -830,7 +861,9 @@ def command_publish(args: argparse.Namespace) -> int:
         print(f"ERROR: {reason}")
         return 1
     try:
-        commits_to_publish = local_commits(args.root, args.base)
+        commits_to_publish = local_commits(
+            args.root, resolve_base(args.root, args.remote, args.base)
+        )
     except GitUnavailableError as failure:
         print(f"ERROR: git nao respondeu, portanto os commits locais nao foram medidos: {failure}")
         return 1
@@ -1166,7 +1199,9 @@ def command_status(args: argparse.Namespace) -> int:
     print(f"pr: {delivery.get('pr_url', 'not recorded')}")
     print("ci: not queried")
     try:
-        commit_count = len(local_commits(args.root, args.base))
+        commit_count = len(
+            local_commits(args.root, resolve_base(args.root, args.remote, args.base))
+        )
     except GitUnavailableError as failure:
         print(f"local_commits: unmeasured (git nao respondeu: {failure})")
     else:
@@ -1546,6 +1581,9 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 
     status = subparsers.add_parser("status")
     status.add_argument("--base", default="main")
+    # `status` accepted `--base` and not `--remote`, so it could be told which branch to
+    # compare against and not which remote the branch belongs to (T219).
+    status.add_argument("--remote", default="origin")
 
     validate_ci = subparsers.add_parser("validate-ci")
     validate_ci.add_argument("--branch")
