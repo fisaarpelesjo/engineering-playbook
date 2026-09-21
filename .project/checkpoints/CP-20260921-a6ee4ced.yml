@@ -1,0 +1,72 @@
+schema_version: 1.0.0
+checkpoint_id: CP-20260921-a6ee4ced
+created_at: '2026-09-21T15:10:12Z'
+workstream: WS-001
+task: T208
+branch: fix/024-verdict-signed-by-the-run
+head: 48639d309ec5fffa78082e655afddd999282a29f
+working_tree:
+  status: dirty
+  modified_paths:
+  - M  .github/workflows/quality.yml
+  - A  .project/checkpoints/CP-20260921-6775978e.yml
+  - A  .project/checkpoints/CP-20260921-8288889c.yml
+  - A  .project/checkpoints/CP-20260921-c65f5350.yml
+  - A  .project/checkpoints/CP-20260921-da1f47d1.yml
+  - M  .project/last-ci-run.yml
+  - M  .project/schemas/state.schema.json
+  - MM .project/state.yml
+  - M  docs/delivery/README.md
+  - A  scripts/attest.py
+  - M  specs/003-no-stage-without-a-mechanism/spec.md
+  - A  src/engineering_playbook/attestation.py
+  - M  src/engineering_playbook/cli.py
+  - M  src/engineering_playbook/commands.py
+  - M  src/engineering_playbook/core.py
+  - M  src/engineering_playbook/delivery.py
+  - M  src/engineering_playbook/receipt.py
+  - M  src/engineering_playbook/resources/.github/workflows/quality.yml
+  - M  src/engineering_playbook/resources/.project/schemas/state.schema.json
+  - M  src/engineering_playbook/resources/docs/delivery/README.md
+  - A  src/engineering_playbook/resources/scripts/attest.py
+  - M  tests/unit/test_merge_records_the_squash_commit.py
+  - A  tests/unit/test_signed_verdict_leaves_the_tree.py
+  - M  tests/unit/test_tree_survives_the_squash.py
+  - ?? .project/checkpoints/CP-20260921-0d5d23fb.yml
+  - ?? .project/checkpoints/CP-20260921-ebb4dff2.yml
+completed_work:
+- Implemented playbook artifacts or recorded current progress.
+commands:
+- uv sync --locked
+- uv run ruff format --check .
+- uv run ruff check .
+- uv run pyright
+- uv run pytest
+- uv run python scripts/verify.py
+- uv run python scripts/doctor.py
+- uv run python scripts/resume.py
+- uv run python scripts/reconcile.py
+- uv run python scripts/bootstrap.py
+- uv run python scripts/delivery.py status
+- uv run python scripts/checkpoint.py
+- engineering-playbook checkpoint
+validation:
+  passed:
+  - uv sync --locked
+  - uv run ruff format --check .
+  - uv run ruff check .
+  - uv run pyright
+  - uv run pytest
+  - uv run python scripts/verify.py
+  - uv run python scripts/doctor.py
+  - uv run python scripts/resume.py
+  - uv run python scripts/reconcile.py
+  - uv run python scripts/bootstrap.py
+  - uv run python scripts/delivery.py status
+  - uv run python scripts/checkpoint.py
+  - engineering-playbook checkpoint
+  failed: []
+  not_run: []
+blockers: []
+next_action: Retomar com uv run python scripts/resume.py antes de novas mudancas.
+battery_claim_divergent: false

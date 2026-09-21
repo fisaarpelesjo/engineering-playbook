@@ -8,8 +8,15 @@ from pathlib import Path
 from typing import Any
 
 try:
+    from .attestation import (
+        SIGNER_WORKFLOW_PATH,
+        attestation_covers_tree,
+        repository_identity,
+        verdict_is_expected,
+    )
     from .core import (
         ROOT,
+        GhUnavailableError,
         GitUnavailableError,
         git_branch,
         git_capture,
@@ -24,8 +31,15 @@ try:
         write_yaml_atomic,
     )
 except ImportError:
+    from engineering_playbook.attestation import (
+        SIGNER_WORKFLOW_PATH,
+        attestation_covers_tree,
+        repository_identity,
+        verdict_is_expected,
+    )
     from engineering_playbook.core import (
         ROOT,
+        GhUnavailableError,
         GitUnavailableError,
         git_branch,
         git_capture,
@@ -776,7 +790,7 @@ def command_merge(args: argparse.Namespace) -> int:
         return 1
     if not require_remote_authorization(args):
         return 1
-    workflow = args.root / ".github/workflows/quality.yml"
+    workflow = args.root / SIGNER_WORKFLOW_PATH
     if not workflow.exists():
         print("ERROR: CI workflow is missing.")
         return 1
@@ -784,11 +798,16 @@ def command_merge(args: argparse.Namespace) -> int:
     if branch_is_main(branch):
         print("ERROR: merge requires a pull request branch.")
         return 1
-    pr = run(args.root, ["gh", "pr", "view", branch, "--json", "title,number"])
+    pr = run(args.root, ["gh", "pr", "view", branch, "--json", "title,number,headRefOid"])
     if pr.returncode != 0:
         print("ERROR: PR is missing.")
         return 1
-    title = json.loads(pr.stdout)["title"]
+    pr_data: dict[str, Any] = json.loads(pr.stdout)
+    title = pr_data["title"]
+    verdict = signed_verdict_refusal(args.root, pr_data.get("headRefOid"))
+    if verdict is not None:
+        print(verdict)
+        return 1
     # `--delete-branch` is deliberately not passed to `gh pr merge` here: it makes `gh`
     # check out the base branch locally to remove the merged branch, and that checkout
     # is what failed with "Your local changes ... would be overwritten by checkout" on
@@ -811,6 +830,114 @@ def command_merge(args: argparse.Namespace) -> int:
     run(args.root, ["uv", "run", "python", "scripts/checkpoint.py"])
     return record_merge_commit(
         args.root, branch, merge_returncode=merge.returncode, merge_stderr=merge.stderr.strip()
+    )
+
+
+def signed_verdict_refusal(root: Path, head_oid: str | None = None) -> str | None:
+    """The reason this content must not be integrated, or None when a signed verdict covers it.
+
+    THE GATE THAT REPLACED THE STATE FIELD (issue #24, spec 003 FR-006, T208/T209). Until this
+    existed, the only thing standing between unmeasured content and `main` was a field the same
+    process wrote on its way past -- `last_verified_commit`, then `last_verified_tree`, each
+    defeated by the same self-reference: the record changes the content it is a record of. This
+    asks GitHub instead, about a signature produced by an identity no step here can reach.
+
+    WHEN IT REFUSES, AND WHY EACH CASE IS A REFUSAL RATHER THAN A PASS:
+
+    - `gh` could not answer at all: refused. NFR-002 -- a control that cannot take its
+      measurement fails; an unreachable network is not a conformance verdict.
+    - no attestation covers this tree: refused. The ordinary cause is a run still in flight,
+      because `publish` pushes the branch and the verdict is minted at the end of that run. The
+      answer is to wait for it, not to merge ahead of it, which is why this refuses instead of
+      queueing an auto-merge against content no run has signed.
+
+    WHEN IT DOES NOT APPLY, and why each exemption is measured rather than assumed. A gate nobody
+    can pass is a gate that gets deleted, and deleting it removes the control for everyone, so
+    each case below is checked against the thing that actually decides it:
+
+    - a derived project with `ci: none`, or no workflow at all: read off the tree by
+      `verdict_is_expected`. No workflow means no workflow identity means nothing to sign with.
+    - a PRIVATE repository: asked of GitHub, not inferred. Attestations need a public repository
+      or a plan that includes them, so `.github/workflows/quality.yml` mints nothing for a private
+      one. This predicate and that `if:` condition are the two halves of one limit; they were
+      written apart once, and a private derived project would have inherited a merge that could
+      never succeed. FR-020 requires the limit be declared rather than the fix asserted
+      universally -- these projects keep the commit/ancestry mechanism in `core.verify_root`.
+
+    The exemption is announced, never silent: a reader has to be able to tell "this content has no
+    verdict" from "nothing here can have one".
+
+    THE CONTENT MEASURED IS THE CONTENT THE SERVER WILL INTEGRATE. `head_oid` is the pull
+    request's head as GitHub reports it, not the local HEAD: those are the same commit in the
+    ordinary flow and are not the same commit whenever the local checkout is behind the branch on
+    the server. Gating on the local tree would then verify content the server is not about to
+    merge, which is a pass that proves nothing. When the server's head is not present in the local
+    object store, this refuses and says to fetch, rather than fetching behind the operator's back
+    or falling back to a tree it can reach.
+
+    DECLARED LIMIT, not closed here: `gh pr merge --auto` may integrate later, when the checks go
+    green, against whatever the head is at that moment. A head that moved after this measurement
+    is content this gate did not see. The server's required checks still run against that new
+    head; the signed verdict is not re-read. Closing it needs the verification to be a required
+    check on the server rather than a step in this command -- recorded as open in
+    `specs/003-no-stage-without-a-mechanism/spec.md`, matrix line 15.
+    """
+    if not verdict_is_expected(root):
+        return None
+    ref = head_oid or "HEAD"
+    if head_oid is not None:
+        # `rev-parse --verify` accepts any well-formed 40-hex string, present or not, so asking
+        # it whether the server's head exists here answers about spelling rather than about the
+        # object store. `cat-file -t` reads the object itself.
+        try:
+            head_type = git_capture(root, "cat-file", "-t", head_oid)
+        except GitUnavailableError:
+            head_type = ""
+        if head_type != "commit":
+            return (
+                f"ERROR: o head da pull request ({head_oid}) nao existe neste repositorio local, "
+                "portanto o conteudo que o servidor vai integrar nao foi medido. Execute "
+                "`git fetch origin` e repita; nada foi integrado."
+            )
+    try:
+        tree = git_tree(root, ref)
+    except GitUnavailableError as failure:
+        return f"ERROR: git nao respondeu, portanto a tree a integrar nao foi medida: {failure}"
+    if tree == "unborn":
+        return (
+            f"ERROR: {ref} nao resolve para nenhum commit, portanto nao ha conteudo a medir. "
+            "Nada foi integrado."
+        )
+    try:
+        slug, is_public = repository_identity(root)
+    except GhUnavailableError as failure:
+        return (
+            "ERROR: gh nao respondeu, portanto nao se sabe sequer se este repositorio pode ter "
+            f"veredicto assinado, e indisponibilidade nao equivale a conformidade (NFR-002): "
+            f"{failure}"
+        )
+    if not is_public:
+        print(
+            f"NOTE: {slug} is private, so no signed verdict can exist for it -- attestations "
+            "need a public repository or a plan that includes them. The signed-verdict gate "
+            "does not apply here (declared limit, spec 003 FR-020); this repository keeps the "
+            "commit/ancestry mechanism as its only check."
+        )
+        return None
+    try:
+        covered, detail = attestation_covers_tree(root, tree, slug)
+    except GhUnavailableError as failure:
+        return (
+            "ERROR: gh nao respondeu, portanto o veredicto assinado nao foi medido, e "
+            f"indisponibilidade nao equivale a conformidade (NFR-002): {failure}"
+        )
+    if covered:
+        return None
+    return (
+        f"ERROR: {detail}\n"
+        "Nothing was merged. The verdict is minted by the quality run for this branch, at the "
+        "end of it; re-run `merge --auto --yes-remote` once that run has finished, or run "
+        "`uv run python scripts/attest.py verify` to see the same answer directly."
     )
 
 

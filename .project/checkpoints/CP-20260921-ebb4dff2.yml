@@ -1,0 +1,49 @@
+schema_version: 1.0.0
+checkpoint_id: CP-20260921-ebb4dff2
+created_at: '2026-09-21T15:02:20Z'
+workstream: WS-001
+task: T208
+branch: fix/024-the-verdict-leaves-the-tree
+head: 2d7605a1313fb7ce601615861e9c217978fa8122
+working_tree:
+  status: dirty
+  modified_paths:
+  - M .project/last-ci-run.yml
+  - ' M .project/state.yml'
+  - ?? .project/checkpoints/CP-20260921-0d5d23fb.yml
+completed_work:
+- Implemented playbook artifacts or recorded current progress.
+commands:
+- uv sync --locked
+- uv run ruff format --check .
+- uv run ruff check .
+- uv run pyright
+- uv run pytest
+- uv run python scripts/verify.py
+- uv run python scripts/doctor.py
+- uv run python scripts/resume.py
+- uv run python scripts/reconcile.py
+- uv run python scripts/bootstrap.py
+- uv run python scripts/delivery.py status
+- uv run python scripts/checkpoint.py
+- engineering-playbook checkpoint
+validation:
+  passed:
+  - uv sync --locked
+  - uv run ruff format --check .
+  - uv run ruff check .
+  - uv run pyright
+  - uv run pytest
+  - uv run python scripts/verify.py
+  - uv run python scripts/doctor.py
+  - uv run python scripts/resume.py
+  - uv run python scripts/reconcile.py
+  - uv run python scripts/bootstrap.py
+  - uv run python scripts/delivery.py status
+  - uv run python scripts/checkpoint.py
+  - engineering-playbook checkpoint
+  failed: []
+  not_run: []
+blockers: []
+next_action: Retomar com uv run python scripts/resume.py antes de novas mudancas.
+battery_claim_divergent: false

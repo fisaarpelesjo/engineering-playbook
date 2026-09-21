@@ -47,7 +47,7 @@ read STALE once that squash lands -- it never covers the commit that actually re
 survives it. `check_ci_receipt` below tries `head` first (the common case, and the only field
 old receipts have); when it differs, it falls back to `tree`, accepted through the exact same
 `engineering_playbook.core.accepted_verified_trees` predicate `verify_root` and
-`command_reconcile` gate on for `last_verified_tree` -- one definition of "still covers HEAD",
+`command_reconcile` report on for `last_verified_tree` -- one definition of "still covers HEAD",
 not three. A receipt missing `tree` cannot take that fallback and reads STALE on a commit
 mismatch, same as before this field existed.
 
