@@ -1,15 +1,15 @@
 schema_version: 1.0.0
-updated_at: '2026-09-21T15:10:12Z'
+updated_at: '2026-09-21T16:19:39Z'
 active_workstream: WS-001
-current_branch: fix/024-verdict-signed-by-the-run
-issue: 24
+current_branch: fix/036-start-measures-its-base
+issue: 36
 current_phase: implement
 status: in_progress
 active_specification: specs/003-no-stage-without-a-mechanism/spec.md
 active_plan: specs/003-no-stage-without-a-mechanism/plan.md
 active_tasks: specs/003-no-stage-without-a-mechanism/tasks.md
-active_task: T208
-last_checkpoint: .project/checkpoints/CP-20260921-a6ee4ced.yml
+active_task: T218
+last_checkpoint: .project/checkpoints/CP-20260921-d9f04a3e.yml
 last_verified_commit: 48639d309ec5fffa78082e655afddd999282a29f
 validation:
   passed:
@@ -32,10 +32,10 @@ blockers: []
 next_actions:
 - Retomar com uv run python scripts/resume.py antes de novas mudancas.
 delivery:
-  branch: feat/004-the-pipeline-state
+  branch: fix/024-verdict-signed-by-the-run
   base: main
   remote: origin
-  pr_number: 33
-  pr_url: https://github.com/fisaarpelesjo/engineering-playbook/pull/33
-  updated_at: '2026-09-21T02:08:16Z'
+  pr_number: 37
+  pr_url: https://github.com/fisaarpelesjo/engineering-playbook/pull/37
+  updated_at: '2026-09-21T15:13:55Z'
 last_verified_tree: 1ddfcf0eba1f0f19f6d8048516caafd2104be036

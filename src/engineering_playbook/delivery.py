@@ -445,6 +445,99 @@ Remote operations are not executed by prepare.
 """
 
 
+def base_ref_name(remote: str, base: str) -> str:
+    """`refs/remotes/<remote>/<base>`, spelled in full on purpose.
+
+    `origin/main` is a DWIM name, and `refs/tags/` wins over `refs/remotes/` when both exist. A
+    review of this slice built that case: with a tag literally named `origin/main`, `rev-parse
+    origin/main` resolved to the tag, the containment count came back 0, and `start` accepted the
+    very state it exists to refuse -- silently, because git's ambiguity warning goes to stderr and
+    a successful `git_capture` discards it. Exotic, and free to close.
+    """
+    return f"refs/remotes/{remote}/{base}"
+
+
+def unmerged_base_refusal(root: Path, remote: str, base: str) -> str | None:
+    """Why this HEAD must not become the parent of a new slice, or None when it may.
+
+    THE DEFECT THIS EXISTS FOR (issue #36, measured 2026-09-21). `start` created the branch from
+    whatever HEAD happened to be checked out and asked nothing about it. After a squash merge the
+    operator's HEAD holds the pre-squash commits, and `main` holds one new commit carrying the
+    same content under a different identity. A branch started there therefore replays history the
+    base already has:
+
+        git rev-list --left-right --count origin/main...HEAD   ->   1  7
+        gh pr view 35 --json mergeable                          ->   CONFLICTING
+        git diff --name-only origin/main HEAD                   ->   only the new slice's files
+
+    The content did not collide. Two histories carrying the same content did. The cost was a full
+    turn of the cycle -- branch, battery, commit, publish, pull request, CI run and attestation --
+    all discarded and redone from the base, because the alternative was a force push, which
+    `ENGINEERING.md` rules out.
+
+    WHAT IS MEASURED: whether the base contains HEAD, as `git rev-list --count HEAD ^<base>` == 0.
+    Containment, not currency: a HEAD strictly behind the base passes, because branching from an
+    older ancestor produces no conflict, only a rebase someone may want later.
+
+    WHY THE MEASUREMENT IS TAKEN AGAINST THE LOCAL REMOTE REF, WITHOUT FETCHING. `start` is a
+    local command, and a command that quietly reaches the network is a command whose failures
+    surprise. A stale base ref then errs toward refusing rather than accepting -- the older the
+    ref, the fewer commits it contains -- WHICH HOLDS ONLY WHILE THE BASE ADVANCES BY
+    FAST-FORWARD. A review of this slice produced the counter-example: rewrite the base
+    non-fast-forward upstream, and the stale ref accepts a HEAD the fresh ref refuses. On `main`
+    the server forbids force pushes (coverage matrix line 12), so the property holds there; a
+    `--base` without that protection does not inherit it. The refusal says to fetch, and the
+    operator decides.
+
+    WHEN THE MEASUREMENT CANNOT BE TAKEN. No such local ref, or no commit at HEAD yet: refused,
+    each with its own message, because "I could not ask" is not "the answer is yes" (NFR-002).
+
+    KNOWN BYPASS VECTORS, per FR-009. Stated as measured, not as hoped:
+
+    - `--allow-unmerged-head`, for the legitimate case this would otherwise block: stacking a
+      slice on one not yet integrated. Explicit, named in the operator's own command line, and it
+      announces itself. It leaves no machine-readable trace, so an audit cannot later tell that a
+      branch was born under it -- recorded as debt, task T220.
+    - `git switch -c`, `git checkout -b` and `git branch` run directly, bypassing `start`
+      entirely. NOT mitigated, for an automated agent or for a human: the harness `PreToolUse`
+      control (FR-011) matches `commit|push|merge|rebase|reset`, and `branch` is on its read-only
+      list. Measured against `.claude/hooks/enforce_delivery_pipeline.py` during this slice's
+      review: `git switch -c feat/001-x`, `git checkout -b feat/001-x` and `git branch feat/001-x`
+      are all allowed. Closing it means widening that hook, which is task T221 rather than this
+      slice, because widening it without `--from-base` below would leave an operator no way to
+      reach the base at all.
+    """
+    if not remote or not base:
+        return (
+            f"ERROR: remote e base nao podem ser vazios (remote={remote!r}, base={base!r}), "
+            "portanto nao ha ref contra o qual medir. Nenhuma branch foi criada."
+        )
+    ref = base_ref_name(remote, base)
+    if not git_ref_exists(root, ref):
+        return (
+            f"ERROR: {ref} nao existe neste repositorio local, portanto nao se sabe se o HEAD "
+            f"actual ja foi integrado. Execute `git fetch {remote}` e repita. Nenhuma branch foi "
+            "criada."
+        )
+    if not git_ref_exists(root, "HEAD"):
+        return (
+            "ERROR: este repositorio ainda nao tem commit algum, portanto nao ha HEAD a medir "
+            "contra a base. Nenhuma branch foi criada."
+        )
+    unmerged = git_capture(root, "rev-list", "--count", "HEAD", f"^{ref}")
+    if unmerged == "0":
+        return None
+    return (
+        f"ERROR: o HEAD actual tem {unmerged} commit(s) que {remote}/{base} nao contem, portanto "
+        f"uma branch criada aqui replica historico que a base ja integrou -- tipicamente sob "
+        f"outra identidade, apos um squash merge, o que a pull request so revela como conflito. "
+        f"Nenhuma branch foi criada.\n"
+        f"Repita com --from-base para partir de {remote}/{base} mantendo as alteracoes por "
+        f"commitar, ou com --allow-unmerged-head se esta deliberadamente a empilhar esta fatia "
+        f"sobre outra ainda por integrar."
+    )
+
+
 def command_start(args: argparse.Namespace) -> int:
     branch = build_branch_name(args.type, args.number, args.slug)
     if git_status(args.root) and not args.allow_dirty:
@@ -453,7 +546,32 @@ def command_start(args: argparse.Namespace) -> int:
     if not validate_branch_name(branch):
         print(f"ERROR: invalid branch name: {branch}")
         return 1
-    completed = run(args.root, ["git", "switch", "-c", branch])
+    if args.allow_unmerged_head:
+        print(
+            "NOTE: --allow-unmerged-head. The base-containment check is being overridden, so "
+            "this branch may replay history the base already integrated. Deliberate stacking is "
+            "the one case that warrants it; anything else produces a conflicting pull request "
+            "(issue #36)."
+        )
+    elif not args.from_base:
+        try:
+            refusal = unmerged_base_refusal(args.root, args.remote, args.base)
+        except GitUnavailableError as failure:
+            print(f"ERROR: git nao respondeu, portanto a base nao foi medida: {failure}")
+            return 1
+        if refusal is not None:
+            print(refusal)
+            return 1
+    # `--from-base` makes the refusal actionable WITHOUT leaving the pipeline. Without it the
+    # only way out of a HEAD the base has absorbed is a raw `git switch -c <branch> origin/main`,
+    # so the gate would be telling the operator to bypass the very pipeline it belongs to -- and
+    # closing the harness hook over `switch` (task T221) would then leave no way out at all.
+    # Uncommitted work travels across the switch, which is the ordinary shape of a slice being
+    # started: the content is in the working tree, not in the commits being left behind.
+    switch = ["git", "switch", "-c", branch]
+    if args.from_base:
+        switch.append(base_ref_name(args.remote, args.base))
+    completed = run(args.root, switch)
     if completed.returncode != 0:
         print(completed.stderr.strip())
         return completed.returncode
@@ -1101,6 +1219,18 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     start.add_argument("--number", required=True)
     start.add_argument("--slug", required=True)
     start.add_argument("--allow-dirty", action="store_true")
+    start.add_argument("--remote", default="origin")
+    start.add_argument("--base", default="main")
+    start.add_argument(
+        "--allow-unmerged-head",
+        action="store_true",
+        help="start from a HEAD the base does not contain, for deliberately stacked slices",
+    )
+    start.add_argument(
+        "--from-base",
+        action="store_true",
+        help="branch from <remote>/<base> instead of HEAD, carrying uncommitted work across",
+    )
 
     prepare = subparsers.add_parser("prepare")
     prepare.add_argument("--title")
