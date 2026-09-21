@@ -572,7 +572,9 @@ def unmerged_base_refusal(root: Path, remote: str, base: str) -> str | None:
 ORIGIN_FILE = ".project/delivery/branch-origin.yml"
 
 
-def record_branch_origin(root: Path, branch: str, base_ref: str, override: str | None) -> None:
+def record_branch_origin(
+    root: Path, branch: str, base_ref: str, started_from: str, override: str | None
+) -> None:
     """Write how this branch came to exist, so a later reader does not have to take it on trust.
 
     T220 / FR-009 / FR-012. `--allow-unmerged-head` printed a warning and nothing else. The
@@ -584,6 +586,13 @@ def record_branch_origin(root: Path, branch: str, base_ref: str, override: str |
     its receipt, `checkpoint` writes its own, the state carries the verdict cache, CI writes the
     run receipt. This was the one step whose exception existed only as words on a screen.
 
+    WHY THE COMMIT AND NOT ONLY THE NAME. The first version stored `base_ref: "HEAD"`
+    whenever the branch was not started with `--from-base` -- which is exactly the path
+    `--allow-unmerged-head` enables, and therefore the only path where this record has audit
+    value. By the time anyone reads the file, `HEAD` names the new branch, so the record said
+    an exception had happened and could not say what it started from. Review measured that;
+    `started_from` carries the resolved commit, read before the switch.
+
     WRITTEN: by `start`, once, immediately after the branch exists.
     INVALIDATED: by the next `start`, which overwrites it. The file describes the branch currently
     being worked on and makes no claim about any earlier one -- `.project/delivery/` is git-ignored
@@ -594,6 +603,7 @@ def record_branch_origin(root: Path, branch: str, base_ref: str, override: str |
         {
             "branch": branch,
             "base_ref": base_ref,
+            "started_from": started_from,
             "override": override,
             "created_at": utc_now(),
         },
@@ -630,6 +640,12 @@ def command_start(args: argparse.Namespace) -> int:
     # closing the harness hook over `switch` (task T221) would then leave no way out at all.
     # Uncommitted work travels across the switch, which is the ordinary shape of a slice being
     # started: the content is in the working tree, not in the commits being left behind.
+    # Resolved before the switch: afterwards `HEAD` names the branch being created, so a
+    # record taken then cannot say where it came from (review finding on this slice).
+    try:
+        started_from = git_head(args.root)
+    except GitUnavailableError:
+        started_from = "unmeasured"
     switch = ["git", "switch", "-c", branch]
     if args.from_base:
         switch.append(base_ref_name(args.remote, args.base))
@@ -642,6 +658,7 @@ def command_start(args: argparse.Namespace) -> int:
         args.root,
         branch,
         base_ref_name(args.remote, args.base) if args.from_base else "HEAD",
+        started_from,
         override,
     )
     print(branch)
@@ -1229,6 +1246,7 @@ def command_status(args: argparse.Namespace) -> int:
         origin = load_yaml(args.root / ORIGIN_FILE)
         override = origin.get("override")
         print(f"branch_from: {origin.get('base_ref', 'unknown')}")
+        print(f"branch_started_from: {origin.get('started_from', 'unknown')}")
         # Printed whichever way it went. An exception that only shows up when it was used reads,
         # to anyone scanning output, exactly like a line somebody forgot to look for.
         print(f"branch_override: {override or 'none'}")
