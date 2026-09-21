@@ -1,15 +1,15 @@
 schema_version: 1.0.0
-updated_at: '2026-09-21T16:19:39Z'
+updated_at: '2026-09-21T16:48:50Z'
 active_workstream: WS-001
-current_branch: fix/036-start-measures-its-base
-issue: 36
+current_branch: feat/039-the-matrix-is-measured
+issue: 39
 current_phase: implement
 status: in_progress
 active_specification: specs/003-no-stage-without-a-mechanism/spec.md
 active_plan: specs/003-no-stage-without-a-mechanism/plan.md
 active_tasks: specs/003-no-stage-without-a-mechanism/tasks.md
-active_task: T218
-last_checkpoint: .project/checkpoints/CP-20260921-d9f04a3e.yml
+active_task: T214
+last_checkpoint: .project/checkpoints/CP-20260921-0b52c0b4.yml
 last_verified_commit: 48639d309ec5fffa78082e655afddd999282a29f
 validation:
   passed:
@@ -32,10 +32,10 @@ blockers: []
 next_actions:
 - Retomar com uv run python scripts/resume.py antes de novas mudancas.
 delivery:
-  branch: fix/024-verdict-signed-by-the-run
+  branch: fix/036-start-measures-its-base
   base: main
   remote: origin
-  pr_number: 37
-  pr_url: https://github.com/fisaarpelesjo/engineering-playbook/pull/37
-  updated_at: '2026-09-21T15:13:55Z'
+  pr_number: 38
+  pr_url: https://github.com/fisaarpelesjo/engineering-playbook/pull/38
+  updated_at: '2026-09-21T16:22:54Z'
 last_verified_tree: 1ddfcf0eba1f0f19f6d8048516caafd2104be036
