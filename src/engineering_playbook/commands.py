@@ -149,6 +149,19 @@ def command_reconcile(root: Path, apply: bool = False) -> int:
 
 
 def command_checkpoint(root: Path, *, allow_divergent: bool = False) -> int:
+    """Record a checkpoint file plus the state.yml fields that point at it.
+
+    WRITTEN: on every `engineering-playbook checkpoint` / `scripts/checkpoint.py`
+    invocation that passes the gates below, exactly once per call -- a new checkpoint
+    file at `.project/checkpoints/<id>.yml` (id from `next_checkpoint_id`, FR-003) and
+    `.project/state.yml`'s `last_checkpoint`/`updated_at`/`current_branch`/`validation`
+    fields, in that order, both before this function returns.
+    INVALIDATED: never by content -- a checkpoint is a point-in-time record, not a
+    claim about the future. It IS stale as a `head` reference the moment a later
+    commit moves HEAD; nothing here rewrites an already-written checkpoint to chase
+    that (NFR-002), and `prepare_is_fresh` (delivery.py) is what reacts to a
+    subsequent HEAD change on the `prepare` side of the pipeline.
+    """
     result = verify_root(root)
     if result.errors:
         for error in result.errors:

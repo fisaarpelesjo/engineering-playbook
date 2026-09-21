@@ -291,6 +291,36 @@ def ownership_allows(root: Path, files: list[str]) -> bool:
     return all(any(path == item or path.startswith(f"{item}/") for item in owned) for path in files)
 
 
+def prepare_invalidated_by_own_checkpoint(
+    root: Path, recorded_head: str, current_head: str
+) -> bool:
+    """True when every commit between `recorded_head` and `current_head` only touched
+    the bookkeeping paths `prepare` itself produces -- `.project/checkpoints/` (via the
+    `scripts/checkpoint.py` call `command_prepare` makes) and `.project/state.yml`.
+
+    This is issue #13's exact shape: `prepare` records `head`, then generates a
+    checkpoint; if that checkpoint is later committed on its own, HEAD moves for a
+    reason entirely internal to the pipeline, not because anyone changed the slice's
+    actual content. FR-002 requires that self-invalidation be signaled explicitly
+    where it happens rather than surfacing later as an unexplained rejection -- see
+    `prepare_is_fresh` below, which calls this to choose its message.
+
+    A commit that ALSO touches any other path is deliberately NOT covered here: mixed
+    content means the staleness has a real cause beyond prepare's own artifact, and the
+    generic message is the honest one for that case.
+    """
+    try:
+        if not git_ref_exists(root, recorded_head):
+            return False
+        changed = git_capture(root, "diff", "--name-only", recorded_head, current_head)
+    except GitUnavailableError:
+        return False
+    paths = [line for line in changed.splitlines() if line.strip()]
+    if not paths:
+        return False
+    return all(path.startswith(".project/checkpoints/") or path == STATE_FILE for path in paths)
+
+
 def prepare_is_fresh(root: Path) -> tuple[bool, str]:
     path = root / PREPARE_FILE
     if not path.exists():
@@ -306,6 +336,18 @@ def prepare_is_fresh(root: Path) -> tuple[bool, str]:
     except GitUnavailableError as failure:
         return False, f"prepare could not be checked: git did not answer: {failure}"
     if data.get("head") != head:
+        recorded_head = str(data.get("head") or "")
+        # T304/FR-002: name the self-invalidation explicitly, with the corrective
+        # action, instead of leaving this as the same generic message a genuine
+        # content change would also produce.
+        if recorded_head and prepare_invalidated_by_own_checkpoint(root, recorded_head, head):
+            return False, (
+                f"prepare is obsolete: its own checkpoint step moved HEAD "
+                f"({recorded_head} -> {head}) by committing only bookkeeping paths "
+                "(.project/checkpoints/, .project/state.yml). Corrective action: "
+                "run `scripts/delivery.py prepare` again -- the slice's content was "
+                "not what changed, only the recorded HEAD is stale."
+            )
         return False, "prepare is obsolete: HEAD changed"
     if data.get("branch") != branch:
         return False, "prepare is obsolete: branch changed"
@@ -406,6 +448,18 @@ def command_start(args: argparse.Namespace) -> int:
 
 
 def command_prepare(args: argparse.Namespace) -> int:
+    """Run the gates once and record the approval that `commit`/`publish` consume.
+
+    WRITTEN: `.project/delivery/prepare.yml` and `.project/delivery/pr.md`
+    (git-ignored scratch, both rewritten every call) once all gates below pass; then
+    `scripts/checkpoint.py` is invoked, which writes its own checkpoint file plus
+    `.project/state.yml` fields (see `commands.command_checkpoint`'s own declaration).
+    INVALIDATED: by any later change to HEAD or the current branch (`prepare_is_fresh`
+    compares both against what was recorded here). T304/FR-002: the checkpoint this
+    very function triggers, above, is itself a common cause of that HEAD change once
+    it is committed -- `prepare_is_fresh` names that specific case explicitly instead
+    of leaving it to read as a generic, unexplained rejection.
+    """
     branch = git_branch(args.root)
     if branch_is_main(branch):
         print("ERROR: prepare requires a branch different from main.")
@@ -457,6 +511,22 @@ def command_prepare(args: argparse.Namespace) -> int:
 
 
 def command_commit(args: argparse.Namespace) -> int:
+    """Create the content commit for the current slice, then record it as verified.
+
+    WRITTEN: `.project/delivery/commit-message.txt` (git-ignored scratch, rewritten
+    every call) before `git commit` runs; `.project/state.yml` at most once per call,
+    folded into a SECOND, separate commit right after the content commit (T303,
+    FR-001) -- `record_verified_commit` cannot be written before `git commit` because
+    the commit id it records does not exist yet, and leaving it uncommitted after was
+    issue #12: every slice ended with a dirty `state.yml` the operator had to
+    recognize and discard by hand. `core.accepted_verified_trees` already accepts
+    HEAD's tree OR the tree of any parent of HEAD (issue #10/#30, a PR merge ref), so
+    this bookkeeping commit becoming the new HEAD does not invalidate the verdict
+    recorded on its own parent.
+    INVALIDATED: the whole call refuses up front when `prepare_is_fresh` says the
+    approval on file no longer matches this HEAD/branch (see that function, and T304
+    below, for when the mismatch is prepare's own doing).
+    """
     fresh, reason = prepare_is_fresh(args.root)
     if not fresh:
         print(f"ERROR: {reason}")
@@ -491,12 +561,29 @@ def command_commit(args: argparse.Namespace) -> int:
     committed = git_head(args.root)
     prepare["head"] = committed
     write_yaml_atomic(args.root / PREPARE_FILE, prepare)
-    record_verified_commit(args.root, committed, git_tree(args.root, "HEAD"))
+    wrote_state = record_verified_commit(args.root, committed, git_tree(args.root, "HEAD"))
     print(completed.stdout.strip())
+    if wrote_state:
+        # T303/FR-001: fold the bookkeeping write into a second, minimal commit right
+        # here instead of leaving `.project/state.yml` modified-but-uncommitted --
+        # see this function's own docstring above for why the write cannot happen
+        # before `git commit` instead.
+        add_state = run(args.root, ["git", "add", "--", STATE_FILE])
+        if add_state.returncode != 0:
+            print(add_state.stderr.strip())
+            return add_state.returncode
+        bookkeeping = run(
+            args.root,
+            ["git", "commit", "-m", f"chore(state): record verified commit {committed[:12]}"],
+        )
+        if bookkeeping.returncode != 0:
+            print(bookkeeping.stderr.strip())
+            return bookkeeping.returncode
+        print(bookkeeping.stdout.strip())
     return 0
 
 
-def record_verified_commit(root: Path, commit: str, tree: str | None = None) -> None:
+def record_verified_commit(root: Path, commit: str, tree: str | None = None) -> bool:
     """Move the verified state to the commit (and tree) whose content was measured.
 
     `prepare` runs the gates against the working tree and `commit` turns that
@@ -511,22 +598,36 @@ def record_verified_commit(root: Path, commit: str, tree: str | None = None) -> 
     callers that only ever had a commit id (nothing left calls this without
     one) still work; when it is omitted, `last_verified_tree` is simply not
     touched here.
+
+    WRITTEN: from `command_commit`, immediately after `git commit` creates the
+    content commit -- once per commit, only when the recorded fields actually
+    change (an unchanged call below is a no-op, on purpose: a write nobody
+    needed is exactly what dirties a tree that closed clean). Also called from
+    `command_merge` after a squash merge is confirmed on the server.
+    INVALIDATED: by the next commit that changes `state.status` away from
+    {verified, converged, done}, or by a later call recording a different
+    commit/tree -- never by this function itself.
+
+    Returns True exactly when `.project/state.yml` was written, so the caller
+    (T303, FR-001) knows whether a follow-up bookkeeping commit is needed to
+    keep the working tree clean, and False when there was nothing to record.
     """
     state_path = root / STATE_FILE
     if not state_path.is_file():
-        return
+        return False
     state = load_yaml(state_path)
     if state.get("status") not in {"verified", "converged", "done"}:
-        return
+        return False
     if state.get("last_verified_commit") == commit and (
         tree is None or state.get("last_verified_tree") == tree
     ):
-        return
+        return False
     state["last_verified_commit"] = commit
     if tree is not None:
         state["last_verified_tree"] = tree
     state["updated_at"] = utc_now()
     write_yaml_atomic(state_path, state)
+    return True
 
 
 def remote_url(root: Path, remote: str) -> str | None:
