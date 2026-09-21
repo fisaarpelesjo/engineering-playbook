@@ -1,0 +1,54 @@
+schema_version: 1.0.0
+checkpoint_id: CP-20260921-7c590372
+created_at: '2026-09-21T17:21:41Z'
+workstream: WS-001
+task: T015
+branch: test/015-agent-watch-has-tests
+head: b174bc6e0d1fc0fd3c26e1a226482f2810c5fb2d
+working_tree:
+  status: dirty
+  modified_paths:
+  - M .project/last-ci-run.yml
+  - ' M .project/state.yml'
+  - ' M pyproject.toml'
+  - ' M scripts/agent_watch/subagent_feed.py'
+  - ' M uv.lock'
+  - ?? .project/checkpoints/CP-20260921-67c93a84.yml
+  - ?? .project/checkpoints/CP-20260921-f5cafd33.yml
+  - ?? tests/unit/test_agent_watch_feed.py
+completed_work:
+- Implemented playbook artifacts or recorded current progress.
+commands:
+- uv sync --locked
+- uv run ruff format --check .
+- uv run ruff check .
+- uv run pyright
+- uv run pytest
+- uv run python scripts/verify.py
+- uv run python scripts/doctor.py
+- uv run python scripts/resume.py
+- uv run python scripts/reconcile.py
+- uv run python scripts/bootstrap.py
+- uv run python scripts/delivery.py status
+- uv run python scripts/checkpoint.py
+- engineering-playbook checkpoint
+validation:
+  passed:
+  - uv sync --locked
+  - uv run ruff format --check .
+  - uv run ruff check .
+  - uv run pyright
+  - uv run pytest
+  - uv run python scripts/verify.py
+  - uv run python scripts/doctor.py
+  - uv run python scripts/resume.py
+  - uv run python scripts/reconcile.py
+  - uv run python scripts/bootstrap.py
+  - uv run python scripts/delivery.py status
+  - uv run python scripts/checkpoint.py
+  - engineering-playbook checkpoint
+  failed: []
+  not_run: []
+blockers: []
+next_action: Retomar com uv run python scripts/resume.py antes de novas mudancas.
+battery_claim_divergent: false

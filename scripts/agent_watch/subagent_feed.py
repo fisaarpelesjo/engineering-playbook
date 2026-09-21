@@ -9,9 +9,13 @@ Source of truth on disk:
 
 The harness appends to the .jsonl while a subagent works, so tailing it is a
 live feed. The format is internal and can change between Claude Code releases:
-every unknown shape degrades to a ("raw", preview) event instead of raising.
+every unknown shape degrades to a ("raw", preview) event instead of raising,
+and -- just as importantly -- instead of being dropped. A viewer that hides
+what it failed to parse is a viewer that lies about what the subagent did.
+`tests/unit/test_agent_watch_feed.py` holds that contract to it.
 """
 
+import contextlib
 import json
 import re
 import time
@@ -124,41 +128,93 @@ def tool_line(block: JSONObj, width: int) -> str:
     return f"{name}  {short(json.dumps(inp, ensure_ascii=False), max(width, 8))}"
 
 
+def raw_event(value: object, width: int) -> Event:
+    """Whatever this is, shown rather than swallowed.
+
+    The module contract, stated at the top of this file, is that every unknown shape degrades to
+    a `("raw", preview)` event instead of raising. Issue #15 measured that the typing pass broke
+    half of it: the `isinstance` guards that replaced the old exception path turned a field of
+    the wrong type into a silent drop. A tool whose whole purpose is showing what a subagent did
+    must not decide, on its own, that part of the transcript is not worth showing -- the moment
+    the harness changes its format, silence is exactly the wrong answer.
+    """
+    try:
+        preview = json.dumps(value, ensure_ascii=False)
+    except (TypeError, ValueError):
+        preview = repr(value)
+    return ("raw", short(preview, width))
+
+
+def _prose(kind: Kind, value: object, block: JSONObj, width: int) -> Event:
+    """A `text`/`thinking` block, or the whole block when its payload is not text.
+
+    `_str` turns a payload of the wrong type into the empty string, and an empty string was then
+    dropped -- a recognised block type carrying an unrecognised payload disappeared just as
+    quietly as an unrecognised block type did.
+    """
+    if not isinstance(value, str):
+        return raw_event(block, width)
+    text = value.strip()
+    return (kind, short(text, width)) if text else raw_event(block, width)
+
+
 def events_of(obj: JSONObj, width: int) -> list[Event]:
-    """One transcript line -> [(kind, text)]. Never raises on odd shapes."""
+    """One transcript line -> [(kind, text)]. Never raises, and never drops silently."""
     if obj.get("type") in SKIP_TYPES:
         return []
-    msg = _as_json_obj(obj.get("message")) or {}
+    raw_message = obj.get("message")
+    msg = _as_json_obj(raw_message)
+    if msg is None:
+        # No `message` at all is an ordinary line this view has nothing to say about. A
+        # `message` that is present but is not an object is the harness having changed shape,
+        # which is the case worth seeing.
+        return [] if raw_message is None else [raw_event(raw_message, width)]
     content = msg.get("content")
     out: list[Event] = []
     if isinstance(content, str):
         text = content.strip()
         if text and not obj.get("isMeta"):
             out.append(("prompt", short(text, width)))
+    elif content is not None and _as_json_list(content) is None:
+        out.append(raw_event(content, width))
     else:
         blocks = _as_json_list(content) or []
         for raw_block in blocks:
             block = _as_json_obj(raw_block)
             if block is None:
+                out.append(raw_event(raw_block, width))
                 continue
             bt = block.get("type")
             if bt == "text":
-                text = _str(block.get("text")).strip()
-                if text:
-                    out.append(("text", short(text, width)))
+                out.append(_prose("text", block.get("text"), block, width))
             elif bt == "thinking":
-                text = _str(block.get("thinking")).strip()
-                if text:
-                    out.append(("think", short(text, width)))
+                out.append(_prose("think", block.get("thinking"), block, width))
             elif bt == "tool_use":
                 out.append(("tool", tool_line(block, width - 14)))
             elif bt == "tool_result":
                 c: object = block.get("content")
                 items = _as_json_list(c)
                 if items is not None:
-                    c = " ".join(_str((_as_json_obj(x) or {}).get("text", "")) for x in items)
+                    joined = " ".join(
+                        _str((_as_json_obj(x) or {}).get("text", "")) for x in items
+                    ).strip()
+                    # A list of things this reader does not understand joins to blank. Blank is
+                    # truthy after a `" ".join`, so it used to slip past the "(vazio)" guard and
+                    # render as an empty line: content present, shown as nothing. That is the
+                    # same silence this module exists not to produce.
+                    if not joined:
+                        out.append(raw_event(c, width))
+                        continue
+                    c = joined
                 kind: Kind = "err" if block.get("is_error") else "res"
                 out.append((kind, short(c or "(vazio)", width)))
+            else:
+                # THE SHAPE THE CONTRACT IS ACTUALLY ABOUT. A harness that changes format does
+                # not send `message: 7`; it sends a block type nobody here has heard of --
+                # `image`, `redacted_thinking`, `server_tool_use` are all real ones. Without
+                # this arm they vanished, which is precisely the claim the docstring makes and
+                # the code did not keep (issue #15, found in review).
+                out.append(raw_event(block, width))
     return out
 
 
@@ -187,14 +243,22 @@ class AgentTail:
         self.tools = 0
         self.errors = 0
         self.handed_back = False
+        # Seeded from the file itself in BOTH modes, because `from_start` is a statement about
+        # where to begin reading, not about what is known of the file. Leaving it at 0.0 made a
+        # just-discovered agent read as `parado` and sort last (`watch_grid.visible_boxes`
+        # orders by `last_write`) until its first poll, however busy it actually was. Surfaced
+        # by the first test ever written against this module, issue #15.
+        #
+        # A path that cannot be stat'ed keeps 0.0, deliberately. It reads as `parado` and sorts
+        # last, which is the conservative answer: the alternative considered in review was
+        # `time.time()`, and that would present a file the tool could not even measure as the
+        # most recently active agent in the project.
         self.last_write = 0.0
-        self.first_seen = time.time()
+        with contextlib.suppress(OSError):
+            self.last_write = path.stat().st_mtime
         if not from_start:
-            try:
+            with contextlib.suppress(OSError):
                 self.offset = path.stat().st_size
-                self.last_write = path.stat().st_mtime
-            except OSError:
-                pass
             # Tail mode starts at EOF, so an agent that already handed back
             # before we opened would look merely idle. Read the end of the
             # file once to learn it is finished.
