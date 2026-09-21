@@ -92,28 +92,30 @@ contornavel pelo cliente. `CI`: enforcement em integracao continua, alcancado ob
 a pull request e requisito do ruleset. `parcial`: mecanismo presente com vetor de bypass conhecido.
 `ausente`: nenhum ponto de enforcement.
 
+Esta matriz e lida por instrumento, nao por leitor: `tests/unit/test_coverage_matrix_is_measured.py` (T214) rejeita classificacao fora do vocabulario definido, `parcial` que nao declare o seu alcance, citacao de requisito ou tarefa inexistente, e qualquer alteracao ao conjunto de etapas `ausente` que nao venha acompanhada da actualizacao do inventario fixado. A AC-011 fica satisfeita automaticamente quando esse inventario esvaziar. Limite declarado conforme a NFR-005: o instrumento mede coordenacao e existencia -- que matriz e inventario mudam na mesma edicao, e que o artefacto citado existe -- e nao adequacao. Uma linha pode citar um ficheiro real que cobre outra coisa; isso e a T222. Fundamento medido: duas linhas desta tabela estavam desactualizadas em 2026-09-21, em sentidos opostos, e ambas foram descobertas por acaso.
+
 | # | Etapa | Classificacao | Requisito que a cobre |
 | --- | --- | --- | --- |
-| 1 | Validacao do PRD por instrumento | CI | coberta |
-| 2 | Existencia de especificacao, plano e tarefas referenciados pelo estado | CI | coberta |
-| 3 | Unicidade de identificadores de tarefa em `specs/*` | CI | coberta, spec 002 |
-| 4 | Precedencia da especificacao sobre o codigo | ausente | FR-014, AC-010 |
-| 5 | Issue aberta previamente a entrega | CI | coberta, spec 002 |
-| 6 | Vinculo sub-issue para issue mae e issue mae para especificacao | ausente | FR-015, AC-009 |
-| 7 | Conformidade do nome de branch | CI | coberta |
-| 8 | Proibicao de commit originado na branch por omissao | servidor | coberta |
-| 9 | Ordem `start`, `prepare`, `commit`, `publish`, `merge` | parcial | FR-005, AC-003. T218 acrescentou a precondicao de `start`: recusa partir de HEAD que a base nao contem, com `--from-base` como saida. Permanece parcial porque `publish` e `merge` ainda nao verificam recibo do antecessor, e porque `--base` tem dois referentes entre comandos (T219) |
-| 10 | Formatacao, analise estatica, tipos e testes | servidor | coberta |
-| 11 | Schemas, distribuicao e fixacao de Actions por SHA | CI | coberta |
-| 12 | Pull request obrigatoria, estrategia squash, proibicao de force push | servidor | coberta |
-| 13 | Checks obrigatorios para integracao | servidor | coberta |
-| 14 | Execucao da bateria previamente ao push | ausente, hook nao instalado | FR-003, AC-002 |
-| 15 | Emissao do veredicto de conformidade | CI | coberta, T208/T209: attestation assinada pela identidade OIDC da execucao, emitida em job proprio que depende das duas baterias; `last_verified_commit` e `last_verified_tree` reclassificados como cache de leitura |
-| 16 | Caso ignorado nao computado como aprovacao | ausente | FR-008, AC-005 |
-| 17 | Verificacao do veredicto antes da integracao | parcial, controlo no cliente | FR-006. `delivery.py merge` mede a tree do head remoto da pull request e recusa sem veredicto assinado, mas e passo de comando local: integracao pela interface do GitHub nao o atravessa. Ver vectores de bypass abaixo |
+| 1 | Validacao do PRD por instrumento | CI | coberta, `core.validate_prd_document` em `src/engineering_playbook/core.py`, `tests/unit/test_core.py` |
+| 2 | Existencia de especificacao, plano e tarefas referenciados pelo estado | CI | coberta, `core.verify_root` (State reference missing), `tests/unit/test_core.py` |
+| 3 | Unicidade de identificadores de tarefa em `specs/*` | CI | coberta, spec 002, `core.verify_root`, `tests/unit/test_core.py` |
+| 4 | Precedencia da especificacao sobre o codigo | ausente | FR-014, AC-010, fecha com T213 |
+| 5 | Issue aberta previamente a entrega | CI | coberta, spec 002, `delivery.issue_is_open`, `tests/unit/test_issue_gate.py` |
+| 6 | Vinculo sub-issue para issue mae e issue mae para especificacao | ausente | FR-015, AC-009, fecha com T212 |
+| 7 | Conformidade do nome de branch | CI | coberta, `delivery.validate_branch_name`, `tests/unit/test_core.py` |
+| 8 | Proibicao de commit originado na branch por omissao | servidor | coberta, `.github/rulesets/main.yml`, `scripts/git-hooks/pre-commit`, `tests/unit/test_git_hooks.py` |
+| 9 | Ordem `start`, `prepare`, `commit`, `publish`, `merge` | parcial, `publish` e `merge` nao verificam recibo do antecessor | FR-005, AC-003. T218 acrescentou a precondicao de `start`: recusa partir de HEAD que a base nao contem, com `--from-base` como saida. Permanece parcial porque `publish` e `merge` ainda nao verificam recibo do antecessor, e porque `--base` tem dois referentes entre comandos (T219) |
+| 10 | Formatacao, analise estatica, tipos e testes | servidor | coberta, `.github/workflows/quality.yml`, `.github/rulesets/main.yml`, `tests/unit/test_local_ci.py` |
+| 11 | Schemas, distribuicao e fixacao de Actions por SHA | CI | coberta, `core.verify_root` (GitHub Actions must be pinned by full SHA), `tests/unit/test_schema_validation.py`, `tests/unit/test_resource_mirror_parity.py` |
+| 12 | Pull request obrigatoria, estrategia squash, proibicao de force push | servidor | coberta, `.github/rulesets/main.yml`, `tests/unit/test_ruleset_reconciliation.py` |
+| 13 | Checks obrigatorios para integracao | servidor | coberta, `.github/rulesets/main.yml`, `tests/unit/test_ruleset_reconciliation.py` |
+| 14 | Execucao da bateria previamente ao push | parcial, alcance limitado a estacao com `core.hooksPath` configurado, e nao vigora em integracao continua | coberta em parte, T203: `core.verify_root` rejeita `core.hooksPath` nao configurado, com testes adversariais em `tests/unit/test_hooks_path_activation.py`. Vectores declarados no proprio controlo: `--no-verify`, reconfiguracao posterior de `core.hooksPath`, clone onde ninguem executa estes comandos, e execucao em integracao continua, onde e deliberadamente saltado. Refs: FR-003, AC-002 |
+| 15 | Emissao do veredicto de conformidade | CI | coberta, T208/T209, `.github/workflows/quality.yml`, `src/engineering_playbook/attestation.py`, `tests/unit/test_signed_verdict_leaves_the_tree.py`: attestation assinada pela identidade OIDC da execucao, emitida em job proprio que depende das duas baterias; `last_verified_commit` e `last_verified_tree` reclassificados como cache de leitura |
+| 16 | Caso ignorado nao computado como aprovacao | ausente | FR-008, AC-005, fecha com T210 |
+| 17 | Verificacao do veredicto antes da integracao | parcial, controlo no cliente e nao required status check | FR-006, T208, `src/engineering_playbook/delivery.py`, `delivery.py merge` mede a tree do head remoto da pull request e recusa sem veredicto assinado, mas e passo de comando local: integracao pela interface do GitHub nao o atravessa. Ver vectores de bypass abaixo |
 | 18 | Sujeicao do agente automatizado ao pipeline | parcial, alcance limitado a estacao configurada | coberta em parte, T205: `.claude/hooks/enforce_delivery_pipeline.py` rejeita `commit|push|merge|rebase|reset` anteriormente a execucao da ferramenta, com teste em `tests/unit/test_delivery_pipeline_hook.py`. Medido em 2026-09-21: nao cobre `switch`, `checkout -b` nem `branch`, portanto a criacao de branch fora da esteira nao e apanhada (T221). FR-012: fora da estacao configurada, nada disto vigora |
-| 19 | Neutralizacao de injeccao de shell via titulo de pull request | CI | coberta, spec 002 |
-| 20 | Cadeia de rastreabilidade entre pull request e PRD | ausente | FR-013 |
+| 19 | Neutralizacao de injeccao de shell via titulo de pull request | CI | coberta, spec 002, `.github/workflows/quality.yml` (PR_TITLE via env), `tests/unit/test_core.py` |
+| 20 | Cadeia de rastreabilidade entre pull request e PRD | ausente | FR-013, fecha com T212 |
 
 ## Vectores de bypass do veredicto assinado
 

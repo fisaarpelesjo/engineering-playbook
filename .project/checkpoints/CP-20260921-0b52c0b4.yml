@@ -1,0 +1,53 @@
+schema_version: 1.0.0
+checkpoint_id: CP-20260921-0b52c0b4
+created_at: '2026-09-21T16:48:50Z'
+workstream: WS-001
+task: T214
+branch: feat/039-the-matrix-is-measured
+head: 9cd1d651df8356cb9a543b07d4fe4a74ff19b2a7
+working_tree:
+  status: dirty
+  modified_paths:
+  - M .project/last-ci-run.yml
+  - ' M .project/state.yml'
+  - ' M specs/003-no-stage-without-a-mechanism/spec.md'
+  - ' M specs/003-no-stage-without-a-mechanism/tasks.md'
+  - ?? .project/checkpoints/CP-20260921-8b5b43a9.yml
+  - ?? .project/checkpoints/CP-20260921-cbcdf00d.yml
+  - ?? tests/unit/test_coverage_matrix_is_measured.py
+completed_work:
+- Implemented playbook artifacts or recorded current progress.
+commands:
+- uv sync --locked
+- uv run ruff format --check .
+- uv run ruff check .
+- uv run pyright
+- uv run pytest
+- uv run python scripts/verify.py
+- uv run python scripts/doctor.py
+- uv run python scripts/resume.py
+- uv run python scripts/reconcile.py
+- uv run python scripts/bootstrap.py
+- uv run python scripts/delivery.py status
+- uv run python scripts/checkpoint.py
+- engineering-playbook checkpoint
+validation:
+  passed:
+  - uv sync --locked
+  - uv run ruff format --check .
+  - uv run ruff check .
+  - uv run pyright
+  - uv run pytest
+  - uv run python scripts/verify.py
+  - uv run python scripts/doctor.py
+  - uv run python scripts/resume.py
+  - uv run python scripts/reconcile.py
+  - uv run python scripts/bootstrap.py
+  - uv run python scripts/delivery.py status
+  - uv run python scripts/checkpoint.py
+  - engineering-playbook checkpoint
+  failed: []
+  not_run: []
+blockers: []
+next_action: Retomar com uv run python scripts/resume.py antes de novas mudancas.
+battery_claim_divergent: false
