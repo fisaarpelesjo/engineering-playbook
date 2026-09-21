@@ -115,9 +115,14 @@ ONE_SIGNING_JOB = "    if len(signing_jobs) != 1:"
 PR_FILES_STEP = '            "validate-ci --pr-files" in workflow_text,'
 SKIP_UNDECLARED = "        if declaration is None:"
 SKIP_STALE = "    for nodeid in sorted(set(declared) - set(observed)):"
-STAGE_SIX_OPEN = "| 6 | Vinculo sub-issue para issue mae e issue mae para especificacao | ausente |"
-STAGE_SIX_BY_PROSE = (
-    "| 6 | Vinculo sub-issue para issue mae e issue mae para especificacao | servidor |"
+#: No stage reads `ausente` any more -- AC-011 is satisfied -- so the fraud this mutation plants
+#: is the next one along: promoting a `parcial` stage to a closed classification by editing the
+#: word, which the PARTIAL_STAGES pin exists to refuse.
+STAGE_TWENTY_PARTIAL = (
+    "| 20 | Cadeia de rastreabilidade entre pull request e PRD | parcial, o elo ate ao "
+)
+STAGE_TWENTY_BY_PROSE = (
+    "| 20 | Cadeia de rastreabilidade entre pull request e PRD | CI | o elo ate ao "
 )
 
 
@@ -270,13 +275,11 @@ MUTATIONS: tuple[Mutation, ...] = (
         # guard exists to refuse (#39).
         mechanism="a stage cannot be closed by editing prose",
         requirement="FR-016, AC-011, T214",
-        stage=6,
+        stage=20,
         file=SPEC,
-        find=STAGE_SIX_OPEN,
-        replace=STAGE_SIX_BY_PROSE,
-        proves=(
-            f"{MATRIX}::test_the_stages_without_a_mechanism_are_exactly_the_ones_declared_open",
-        ),
+        find=STAGE_TWENTY_PARTIAL,
+        replace=STAGE_TWENTY_BY_PROSE,
+        proves=(f"{MATRIX}::test_the_partial_stages_are_exactly_the_ones_declared_partial",),
     ),
 )
 

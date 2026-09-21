@@ -82,9 +82,6 @@ DECLARED_SKIPS: dict[str, Declaration] = {
     "tests/unit/test_installer_modes.py::test_the_execute_bit_follows_read_and_the_umask": (
         Declaration("Windows ignores the execute bit", expected=_ON_WINDOWS)
     ),
-    "tests/unit/test_coverage_matrix_is_measured.py::test_no_stage_is_left_without_a_mechanism": (
-        Declaration("AC-011 not yet satisfiable")
-    ),
 }
 
 #: Options that mean "this run is not the whole suite". Narrowed runs and runs that execute
