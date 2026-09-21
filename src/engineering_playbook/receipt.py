@@ -18,6 +18,7 @@ matching ``.project/schemas/ci-receipt.schema.json``:
     kind: local_ci_receipt
     ran_at: '<UTC ISO-8601, when the run finished>'
     head: '<git rev-parse HEAD, measured AFTER the run>'
+    tree: '<git rev-parse HEAD^{tree}, measured AFTER the run>'
     head_before_run: '<git rev-parse HEAD, measured BEFORE the run>'
     tree_was_dirty_before_run: <bool>
     tree_changed_during_run: <bool>     # HEAD or dirtiness differed between start and end
@@ -36,6 +37,24 @@ This reader is deliberately tolerant of a receipt that is missing one of these f
 missing instrumentation is itself read as staleness (see `check_ci_receipt`), never as a
 crash and never as a pass. It does not depend on which script becomes the writer, only on the
 shape above.
+
+## `head` versus `tree` (issue #9)
+
+`head` is the commit id the run measured; a squash merge (`gh pr merge --squash`) mints a
+brand-new commit id for identical content, so a receipt keyed on `head` alone can only ever
+read STALE once that squash lands -- it never covers the commit that actually reaches `main`.
+`tree` is the pure-content object (`engineering_playbook.core.git_tree`'s docstring) that
+survives it. `check_ci_receipt` below tries `head` first (the common case, and the only field
+old receipts have); when it differs, it falls back to `tree`, accepted through the exact same
+`engineering_playbook.core.accepted_verified_trees` predicate `verify_root` and
+`command_reconcile` gate on for `last_verified_tree` -- one definition of "still covers HEAD",
+not three. A receipt missing `tree` cannot take that fallback and reads STALE on a commit
+mismatch, same as before this field existed.
+
+COVERAGE, stated plainly: matching by tree proves the content this run measured is still
+reachable as HEAD or a parent of HEAD. It does not, on its own, prove nobody edited the
+receipt file by hand -- self-reported instrumentation, not a third-party attestation (see the
+same declared limit in `core.verify_root`'s docstring for `last_verified_tree`).
 """
 
 from __future__ import annotations
@@ -46,6 +65,8 @@ from pathlib import Path
 from typing import Any, TypedDict, cast
 
 import yaml
+
+from .core import GitUnavailableError, accepted_verified_trees
 
 #: Where the receipt lives, relative to the project root.
 CI_RECEIPT_RELATIVE = ".project/last-ci-run.yml"
@@ -82,6 +103,7 @@ class CiReceiptData(TypedDict, total=False):
     kind: str
     ran_at: str
     head: str
+    tree: str
     head_before_run: str
     tree_was_dirty_before_run: bool
     tree_changed_during_run: bool
@@ -147,7 +169,9 @@ def check_ci_receipt(root: Path, head: str) -> CiReceiptCheck:
     """Whether ``.project/last-ci-run.yml`` under ``root`` covers ``head``.
 
     Never infers green from absence, from a corrupt file, or from a receipt that admits, in
-    its own fields, that it did not measure the whole thing.
+    its own fields, that it did not measure the whole thing. A commit mismatch falls back to
+    comparing the receipt's ``tree`` (issue #9) before giving up -- see the module docstring's
+    "``head`` versus ``tree``" section.
     """
     receipt_path = root / CI_RECEIPT_RELATIVE
     shown = _shown_path(root, receipt_path)
@@ -182,15 +206,42 @@ def check_ci_receipt(root: Path, head: str) -> CiReceiptCheck:
 
     measured_head = str(receipt.get("head", ""))
     if measured_head != head:
-        return CiReceiptCheck(
-            status=CiReceiptStatus.STALE,
-            reason=(
-                f"{shown} mediu {measured_head[:12] or '(vazio)'}, o HEAD atual e {head[:12]}. "
-                "Um recibo medido noutro commit nao cobre este."
-            ),
-            receipt_path=shown,
-            receipt=receipt,
-        )
+        # Issue #9: the commit id itself never survives a squash. Before failing outright, try
+        # the one thing that does -- `tree` -- through the exact same predicate `verify_root`
+        # and `command_reconcile` use for `last_verified_tree` (issue #10: one definition, not
+        # a second inline copy). A receipt with no `tree` at all (pre-#9, or a writer that never
+        # measured one) has no fallback and reads STALE here, same as always.
+        measured_tree = str(receipt.get("tree") or "")
+        tree_covers = False
+        if measured_tree:
+            try:
+                tree_covers = measured_tree in accepted_verified_trees(root)
+            except GitUnavailableError as failure:
+                return CiReceiptCheck(
+                    status=CiReceiptStatus.STALE,
+                    reason=(
+                        f"{shown} mediu {measured_head[:12] or '(vazio)'} (commit diferente do "
+                        f"HEAD atual {head[:12]}); git nao respondeu, portanto a tree nao foi "
+                        f"comparada para confirmar sobrevivencia a um squash: {failure}"
+                    ),
+                    receipt_path=shown,
+                    receipt=receipt,
+                )
+        if not tree_covers:
+            return CiReceiptCheck(
+                status=CiReceiptStatus.STALE,
+                reason=(
+                    f"{shown} mediu {measured_head[:12] or '(vazio)'}, o HEAD atual e "
+                    f"{head[:12]}. Um recibo medido noutro commit nao cobre este, e "
+                    + (
+                        "a tree registrada tambem nao bate com a de HEAD nem a de um pai dele."
+                        if measured_tree
+                        else "o recibo nao registra 'tree' para checar sobrevivencia a um squash."
+                    )
+                ),
+                receipt_path=shown,
+                receipt=receipt,
+            )
     if receipt.get("tree_was_dirty_before_run"):
         return CiReceiptCheck(
             status=CiReceiptStatus.STALE,

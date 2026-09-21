@@ -318,6 +318,20 @@ def run_workflow(path: Path, root: Path, *, dry_run: bool) -> WorkflowResult:
     return result
 
 
+def _git_tree(root: Path) -> str:
+    """HEAD's tree object: the part of a commit that is a pure function of content.
+
+    Recorded in the receipt (issue #9) because a squash merge (`gh pr merge --squash`) mints a
+    brand-new commit id for identical content, so a receipt keyed on `head` alone can only ever
+    read STALE once that squash lands. Mirrors `engineering_playbook.core.git_tree`'s
+    docstring; kept local rather than imported so this module stays runnable standalone (see
+    the module docstring above).
+    """
+    return subprocess.run(
+        ["git", "rev-parse", "HEAD^{tree}"], cwd=root, capture_output=True, text=True, check=False
+    ).stdout.strip()
+
+
 def _measure_git_state(root: Path) -> tuple[str, str]:
     """HEAD and the porcelain dirty listing, read fresh from `root`."""
     head = subprocess.run(
@@ -357,6 +371,7 @@ def _write_receipt(
     dirty_before: str,
 ) -> Path:
     head_after, dirty_after = _measure_git_state(root)
+    tree_after = _git_tree(root)
     moved = bool(head_before) and head_before != head_after
     dirtiness_flipped = bool(head_before) and bool(dirty_before) != bool(dirty_after)
     changed_during_run = moved or dirtiness_flipped
@@ -366,10 +381,12 @@ def _write_receipt(
     lines = [
         "# Escrito por scripts/local_ci.py. NAO editar a mao.",
         "# Diz contra QUE COMMIT esta corrida rodou -- um verde aqui nao vale para outro HEAD.",
+        "# 'tree' sobrevive a um squash (issue #9); 'head' sozinho nao.",
         f"schema_version: {RECEIPT_SCHEMA_VERSION}",
         f"kind: {RECEIPT_KIND}",
         f"ran_at: '{stamp}'",
         f"head: '{head_after}'",
+        f"tree: '{tree_after}'",
         f"head_before_run: '{head_before}'",
         f"tree_was_dirty_before_run: {'true' if dirty_before else 'false'}",
         f"tree_changed_during_run: {'true' if changed_during_run else 'false'}",

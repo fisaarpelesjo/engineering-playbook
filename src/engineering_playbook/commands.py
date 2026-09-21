@@ -7,6 +7,7 @@ from pathlib import Path
 from .core import (
     GhUnavailableError,
     GitUnavailableError,
+    accepted_verified_trees,
     check_ruleset_reconciliation,
     git_branch,
     git_head,
@@ -115,14 +116,22 @@ def command_reconcile(root: Path, apply: bool = False) -> int:
     # The gate in `core.verify_root` reads `last_verified_tree`, not `last_verified_commit`
     # (issue #30) -- only the tree survives a squash. This staleness check follows the same
     # field so it never blocks on the commit id that FR-007 makes purely informative.
+    #
+    # Issue #10: this used to compare only against HEAD's own tree, stricter than `verify_root`,
+    # which also accepts a parent of HEAD (a PR merge ref -- see `git_parents`'s docstring). The
+    # two readers of `last_verified_tree` must agree on what it means, so this now calls the
+    # exact same `accepted_verified_trees` predicate `verify_root` gates on, rather than a
+    # second, narrower copy of the comparison.
     try:
         head_tree = git_tree(root, head)
+        accepted_trees = accepted_verified_trees(root)
     except GitUnavailableError as failure:
         print(f"ERROR: git nao respondeu, portanto a tree de HEAD nao foi medida: {failure}")
         return 1
-    if state.get("last_verified_tree") not in {None, head_tree}:
+    if state.get("last_verified_tree") not in {None, *accepted_trees}:
         findings.append(
-            f"stale verified tree: state={state.get('last_verified_tree')} git={head_tree}"
+            f"stale verified tree: state={state.get('last_verified_tree')} git={head_tree} "
+            f"(nem HEAD nem um pai de HEAD)"
         )
     if not findings:
         print("OK")

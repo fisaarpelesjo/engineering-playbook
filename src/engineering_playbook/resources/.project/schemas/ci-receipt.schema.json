@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "Local CI receipt",
-  "description": "Proof that a local battery ran: against which commit, how completely, and with which tree state. Written by whichever script runs the local battery (e.g. scripts/local_ci.py); read by engineering_playbook.receipt so a checkpoint that claims a green battery can be checked against it. Absence of this file is never read as green.",
+  "description": "Proof that a local battery ran: against which commit, how completely, and with which tree state. Written by whichever script runs the local battery (e.g. scripts/local_ci.py); read by engineering_playbook.receipt so a checkpoint that claims a green battery can be checked against it. Absence of this file is never read as green. 'tree' (issue #9) is the field a squash merge cannot invalidate the way it invalidates 'head'.",
   "type": "object",
   "required": [
     "schema_version",
@@ -26,6 +26,7 @@
     "kind": {"type": "string", "const": "local_ci_receipt"},
     "ran_at": {"type": "string"},
     "head": {"type": "string"},
+    "tree": {"type": "string"},
     "head_before_run": {"type": "string"},
     "tree_was_dirty_before_run": {"type": "boolean"},
     "tree_was_dirty": {"type": "boolean"},
