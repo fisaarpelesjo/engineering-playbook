@@ -1,0 +1,56 @@
+schema_version: 1.0.0
+checkpoint_id: CP-20260921-d0255b75
+created_at: '2026-09-21T18:06:25Z'
+workstream: WS-001
+task: T210
+branch: feat/042-a-skip-is-declared
+head: da14677aac45da80ee95ff48220efa27013a87f5
+working_tree:
+  status: dirty
+  modified_paths:
+  - M .project/last-ci-run.yml
+  - ' M .project/state.yml'
+  - ' M specs/003-no-stage-without-a-mechanism/spec.md'
+  - ' M specs/003-no-stage-without-a-mechanism/tasks.md'
+  - ' M tests/unit/test_coverage_matrix_is_measured.py'
+  - ?? .project/checkpoints/CP-20260921-3f002a3d.yml
+  - ?? .project/checkpoints/CP-20260921-5acec647.yml
+  - ?? tests/conftest.py
+  - ?? tests/skip_policy.py
+  - ?? tests/unit/test_a_skip_is_declared.py
+completed_work:
+- Implemented playbook artifacts or recorded current progress.
+commands:
+- uv sync --locked
+- uv run ruff format --check .
+- uv run ruff check .
+- uv run pyright
+- uv run pytest
+- uv run python scripts/verify.py
+- uv run python scripts/doctor.py
+- uv run python scripts/resume.py
+- uv run python scripts/reconcile.py
+- uv run python scripts/bootstrap.py
+- uv run python scripts/delivery.py status
+- uv run python scripts/checkpoint.py
+- engineering-playbook checkpoint
+validation:
+  passed:
+  - uv sync --locked
+  - uv run ruff format --check .
+  - uv run ruff check .
+  - uv run pyright
+  - uv run pytest
+  - uv run python scripts/verify.py
+  - uv run python scripts/doctor.py
+  - uv run python scripts/resume.py
+  - uv run python scripts/reconcile.py
+  - uv run python scripts/bootstrap.py
+  - uv run python scripts/delivery.py status
+  - uv run python scripts/checkpoint.py
+  - engineering-playbook checkpoint
+  failed: []
+  not_run: []
+blockers: []
+next_action: Retomar com uv run python scripts/resume.py antes de novas mudancas.
+battery_claim_divergent: false
