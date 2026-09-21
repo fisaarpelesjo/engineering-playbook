@@ -4,7 +4,7 @@
   "required": ["schema_version", "checkpoint_id", "created_at", "workstream", "task", "branch", "head", "working_tree", "completed_work", "commands", "validation", "blockers", "next_action"],
   "properties": {
     "schema_version": {"type": "string"},
-    "checkpoint_id": {"type": "string", "pattern": "^CP-[0-9]{8}-[0-9]{3}$"},
+    "checkpoint_id": {"type": "string", "pattern": "^CP-[0-9]{8}-([0-9]{3}|[0-9a-f]{8})$"},
     "created_at": {"type": "string"},
     "workstream": {"type": ["string", "null"]},
     "task": {"type": ["string", "null"], "pattern": "^T[0-9]{3,5}$"},

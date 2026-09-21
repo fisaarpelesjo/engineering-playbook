@@ -1,16 +1,16 @@
 schema_version: 1.0.0
-updated_at: '2026-09-21T01:27:19Z'
+updated_at: '2026-09-21T02:06:04Z'
 active_workstream: WS-001
-current_branch: fix/008-the-receipt-and-reconcile-agree
-issue: 9
+current_branch: feat/004-the-pipeline-state
+issue: 11
 current_phase: converge
 status: converged
 active_specification: specs/001-engineering-playbook/spec.md
 active_plan: specs/001-engineering-playbook/plan.md
 active_tasks: specs/001-engineering-playbook/tasks.md
 active_task: T017
-last_checkpoint: .project/checkpoints/CP-20260921-001.yml
-last_verified_commit: e113162638ca22132bb1765ea2fe023baa08ca2a
+last_checkpoint: .project/checkpoints/CP-20260921-dbe06fa2.yml
+last_verified_commit: b99aedf15cf48aad75d002a2bec1a03e24a7329a
 validation:
   passed:
   - uv sync --locked
@@ -38,4 +38,4 @@ delivery:
   pr_number: 29
   pr_url: https://github.com/fisaarpelesjo/engineering-playbook/pull/29
   updated_at: '2026-09-20T19:57:46Z'
-last_verified_tree: 689664df14a0771a9d36cce314cf47342925d132
+last_verified_tree: 3af0bf7c3aad888dd728d9d65e490f6a4d07e9fc

@@ -5,6 +5,7 @@ import json
 import os
 import re
 import subprocess
+import uuid
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -593,10 +594,88 @@ def utc_now() -> str:
 
 
 def next_checkpoint_id(root: Path) -> str:
+    """A checkpoint identifier, unique across working trees without coordination
+    between them (FR-003/AC-003).
+
+    WRITTEN: by `commands.command_checkpoint`, immediately before the checkpoint file
+    itself is created -- the identifier IS the checkpoint's filename.
+    INVALIDATED: never. Once assigned, an identifier names a fact about the past;
+    NFR-002 forbids reassigning one already on disk, in either this shape or the
+    pre-existing `CP-<date>-<NNN>` one still carried by older commits.
+
+    The previous rule counted `CP-<date>-*.yml` files in THIS working tree only, so two
+    branches that had each created zero checkpoints so far, on the same day, produced
+    the IDENTICAL id (issue #11) -- an add/add git conflict invisible until a rebase.
+    Two alternatives named in the plan were rejected first, and why:
+      - the commit the checkpoint rests on: collides exactly in AC-003's own scenario,
+        two trees sharing the SAME HEAD (right after `git switch -c`, before either has
+        committed anything of its own);
+      - wall-clock time: collides at whatever precision two machines' clocks happen to
+        agree on, and this function has no way to assume clock skew away.
+    A random suffix needs no clock, no commit, and no cross-tree coordination at all --
+    that is a UUID4's entire purpose. Readability of the suffix is deliberately not
+    optimized: the plan's own criterion is uniqueness over legibility when they
+    conflict.
+    """
     today = datetime.now(UTC).strftime("%Y%m%d")
-    checkpoint_dir = root / ".project" / "checkpoints"
-    existing = sorted(checkpoint_dir.glob(f"CP-{today}-*.yml"))
-    return f"CP-{today}-{len(existing) + 1:03d}"
+    suffix = uuid.uuid4().hex[:8]
+    return f"CP-{today}-{suffix}"
+
+
+CHECKPOINT_PATH_PATTERN = re.compile(r"^\.project/checkpoints/CP-[0-9A-Za-z-]+\.yml$")
+
+
+def checkpoint_id_collisions(root: Path) -> list[str]:
+    """Checkpoint filenames that name DIFFERENT content on another local branch
+    (FR-004/AC-004) -- the exact shape an add/add merge conflict takes (issue #11)
+    before a rebase or merge ever surfaces it.
+
+    WRITTEN: never -- this is read-only, called from `verify_root` on every `verify`/
+    `resume`/`checkpoint`/`doctor` invocation, against local git refs only.
+    INVALIDATED: not applicable; there is nothing here to invalidate, only to detect.
+
+    TOLERATES, on purpose (NFR-002): a checkpoint file that exists identically on
+    another branch is not a collision -- the historical measurement in spec 004's
+    "Evidencia historica" found six identifiers assigned by more than one commit,
+    every one byte-identical. It also tolerates the pre-T301 `CP-<date>-<NNN>`
+    filename shape without exception: the collision is about DIVERGENT CONTENT under
+    the same name, never the name's shape.
+
+    DECLARED LIMIT: only `refs/heads` this clone already knows about are compared. A
+    CI checkout (`fetch-depth: 2`, a single ref present) has nothing else to compare
+    against and this returns no findings there -- the check's teeth are in a full
+    local clone before a push/rebase, which is exactly where issue #11 went unnoticed
+    until the conflict itself.
+    """
+    checkpoints_dir = root / ".project" / "checkpoints"
+    if not checkpoints_dir.is_dir():
+        return []
+    try:
+        current_branch = git_branch(root)
+        branches = [
+            branch
+            for branch in git_capture(
+                root, "for-each-ref", "--format=%(refname:short)", "refs/heads"
+            ).splitlines()
+            if branch.strip() and branch.strip() != current_branch
+        ]
+    except GitUnavailableError:
+        return []
+    if not branches:
+        return []
+    findings: list[str] = []
+    for checkpoint_file in sorted(checkpoints_dir.glob("CP-*.yml")):
+        rel = str(checkpoint_file.relative_to(root)).replace("\\", "/")
+        if not CHECKPOINT_PATH_PATTERN.match(rel):
+            continue
+        local_text = checkpoint_file.read_text(encoding="utf-8")
+        for branch in branches:
+            completed = _run_git(root, "show", f"{branch}:{rel}")
+            if completed.returncode != 0:
+                continue  # absent on that branch, or branch unreadable: not a signal
+            if completed.stdout.rstrip("\n") != local_text.rstrip("\n"):
+                findings.append(f"{rel} diverges between the working tree and branch {branch!r}")
+    return findings
 
 
 def validate_transition(old: str, new: str) -> bool:
@@ -867,6 +946,8 @@ def verify_root(root: Path) -> CheckResult:
                 ".project/schemas/checkpoint.schema.json",
             )
         )
+    for collision in checkpoint_id_collisions(root):
+        result.errors.append(f"Checkpoint identifier collision: {collision}")
 
     prd_template = root / "templates/project/requirements.md"
     if prd_template.exists():
@@ -1151,6 +1232,31 @@ def verify_root(root: Path) -> CheckResult:
             "if not apply" in reconcile_body and "write_yaml_atomic" in reconcile_body,
             "reconcile.py must require --apply for writes",
         )
+        # FR-005/T305: every function that writes an accounting artifact (spec 004's
+        # own definition of "Contabilidade": .project/state.yml, .project/checkpoints/,
+        # .project/delivery/) declares, next to the write, WHEN in the flow it runs and
+        # WHAT invalidates it -- so a reader never has to reconstruct that from the
+        # write call alone. DECLARED LIMIT: this only checks the markers are PRESENT,
+        # not that the prose next to them stays accurate as the code around it changes.
+        checkpoint_body = _function_source(commands_text, "command_checkpoint")
+        result.add(
+            "WRITTEN:" in checkpoint_body,
+            "command_checkpoint must declare WRITTEN: (FR-005)",
+        )
+        result.add(
+            "INVALIDATED:" in checkpoint_body,
+            "command_checkpoint must declare INVALIDATED: (FR-005)",
+        )
+
+    delivery_path = root / "src/engineering_playbook/delivery.py"
+    if delivery_path.exists():
+        delivery_text = delivery_path.read_text(encoding="utf-8")
+        # Same FR-005/T305 declaration, for the accounting writes that live in
+        # delivery.py rather than commands.py.
+        for name in ["record_verified_commit", "command_prepare", "command_commit"]:
+            body = _function_source(delivery_text, name)
+            result.add("WRITTEN:" in body, f"{name} must declare WRITTEN: (FR-005)")
+            result.add("INVALIDATED:" in body, f"{name} must declare INVALIDATED: (FR-005)")
 
     workstreams: list[dict[str, Any]] = []
     for path in (root / ".project/workstreams").glob("*.yml"):
