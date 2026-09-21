@@ -108,12 +108,29 @@ a pull request e requisito do ruleset. `parcial`: mecanismo presente com vetor d
 | 12 | Pull request obrigatoria, estrategia squash, proibicao de force push | servidor | coberta |
 | 13 | Checks obrigatorios para integracao | servidor | coberta |
 | 14 | Execucao da bateria previamente ao push | ausente, hook nao instalado | FR-003, AC-002 |
-| 15 | Integridade de `last_verified_commit` | ausente | FR-006, FR-007, AC-004 |
+| 15 | Emissao do veredicto de conformidade | CI | coberta, T208/T209: attestation assinada pela identidade OIDC da execucao, emitida em job proprio que depende das duas baterias; `last_verified_commit` e `last_verified_tree` reclassificados como cache de leitura |
 | 16 | Caso ignorado nao computado como aprovacao | ausente | FR-008, AC-005 |
-| 17 | Medicao do commit efectivamente integrado | parcial, verificacao posterior a integracao | FR-006 |
+| 17 | Verificacao do veredicto antes da integracao | parcial, controlo no cliente | FR-006. `delivery.py merge` mede a tree do head remoto da pull request e recusa sem veredicto assinado, mas e passo de comando local: integracao pela interface do GitHub nao o atravessa. Ver vectores de bypass abaixo |
 | 18 | Sujeicao do agente automatizado ao pipeline | ausente | FR-011, AC-007 |
 | 19 | Neutralizacao de injeccao de shell via titulo de pull request | CI | coberta, spec 002 |
 | 20 | Cadeia de rastreabilidade entre pull request e PRD | ausente | FR-013 |
+
+## Vectores de bypass do veredicto assinado
+
+Enumerados conforme a FR-009 e a FR-018, medidos ou derivados por leitura de instrumento em
+2026-09-21, durante a revisao da fatia T208/T209. A NFR-005 aplica-se: esta lista afirma que estes
+vectores estao enumerados, nao que sejam os unicos.
+
+| Vector | Estado | Fundamento |
+| --- | --- | --- |
+| `quality.yml` alterado na propria branch que esta a ser assinada | aberto | `gh attestation verify --signer-workflow` impoe repositorio e caminho do workflow, nao a sua ref nem o seu conteudo (`gh attestation verify --help`, v2.92.0). Quem faz push de branch pode reduzir a bateria e obter assinatura da mesma identidade. Fecha com trusted builder: passo de assinatura em reusable workflow sobre ref protegida, verificado por `--signer-repo`/`--signer-digest`. Decisao de topologia, pendente do proprietario |
+| Integracao pela interface do GitHub, ou `gh pr merge` a mao | aberto | A verificacao vive em `delivery.command_merge`, no cliente. Fecha tornando-a required status check no servidor, o que exige reordenar o fluxo: a attestation da branch e cunhada pela execucao de push que precede o merge |
+| `merge --auto` integra mais tarde, contra um head que se moveu depois da medicao | aberto | O portao mede o head que `gh pr view --json headRefOid` reporta no instante da chamada. Os checks obrigatorios do servidor correm contra o head novo; o veredicto assinado nao e relido |
+| Assinatura emitida antes da bateria, por reordenacao de passos | fechado | O job de assinatura declara `needs` sobre todos os outros jobs, e `core.attestation_workflow_errors` rejeita workflow em que isso deixe de ser verdade. Teste de mutacao em `tests/unit/test_signed_verdict_leaves_the_tree.py` |
+| Identidade de assinatura alcancavel por codigo do repositorio ou de dependencia | fechado | `id-token: write` alcanca todos os passos do job que a declara. A assinatura corre em job separado, cujos unicos passos sao checkout, `git rev-parse` e a Action; nenhum outro job pode declarar essas permissoes sem falhar `verify` |
+| Attestation emitida em runner self-hosted | fechado | `--deny-self-hosted-runners` na verificacao |
+| Attestation de outro repositorio ou de outro caminho de workflow | fechado | `--repo` e `--signer-workflow` na verificacao. Limite: num clone cujo `origin` aponte para um fork, o slug medido e o do fork |
+| Repositorio privado, que nao pode emitir veredicto | nao aplicavel, declarado | `attestation.repository_identity` mede a visibilidade e o portao nao se aplica; o projecto mantem o mecanismo de commit e ancestralidade. Sem esta medicao o portao seria impossivel de satisfazer, e portao impossivel e portao removido |
 
 ## Exclusoes de escopo
 
@@ -133,13 +150,35 @@ a pull request e requisito do ruleset. `parcial`: mecanismo presente com vetor d
 Tomadas pelo proprietario em 2026-09-20, apos medicao, e vinculantes para as fatias subsequentes.
 
 **Sequenciamento do veredicto.** A substituicao de `last_verified_commit` por `last_verified_tree`
-precede a attestation. Fundamento medido: a tree hash e funcao exclusiva do conteudo e sobrevive ao
+precedeu a attestation. Fundamento medido: a tree hash e funcao exclusiva do conteudo e sobrevive ao
 squash, dado que `strict_required_status_checks_policy` esta activo e obriga a branch a estar
-actualizada perante a base. A medida fecha a mecanica do defeito sem dependencia externa nem
-ampliacao de escopo de token. **Nao satisfaz a FR-006**: o campo permanece escrito e lido pelo
-executor da entrega, sem separacao de funcoes e sem prova verificavel por terceiro. A attestation
-assinada permanece como fatia subsequente, condicionada a autorizacao explicita da dependencia
-`actions/attest` e da ampliacao de `permissions`.
+actualizada perante a base. A medida fechou a mecanica do squash e **nao satisfez a FR-006**, por
+manter o campo escrito e lido pelo executor da entrega.
+
+**Realocacao concluida da raiz de confianca** (autorizada pelo proprietario em 2026-09-21, apos a
+medicao abaixo). A tree tambem nao sobreviveu: o commit que regista o veredicto altera a arvore
+sobre a qual o veredicto e emitido, medido na execucao 35535830710, e oito execucoes consecutivas de
+push em `main` falharam por essa razao (35525340039 a 35553187426). A condicao e geral -- um registo
+produzido dentro da transaccao que descreve falsifica aquilo que afirma -- e nao admite correccao
+dentro da arvore, dado que a escrita e ela propria conteudo. Em consequencia, `quality.yml` emite
+attestation assinada pela identidade OIDC da execucao, com o digest do conteudo como sujeito
+(`actions/attest-build-provenance`, fixado por SHA, sob `id-token: write` e `attestations: write`);
+`delivery.py merge` recusa conteudo sem veredicto assinado; e ambos os campos de estado passam a
+cache de leitura, reportados quando desactualizados e sem constituir portao.
+
+Limites declarados da realocacao, medidos e nao presumidos: a attestation exige repositorio publico
+ou plano que a inclua, de modo que o veredicto e emitido apenas quando o repositorio e publico, e
+`attestation.repository_identity` pergunta-o ao GitHub antes de qualquer portao o exigir; projecto
+derivado com `ci: none` nao possui identidade de execucao e mantem o mecanismo anterior, conforme a
+FR-020.
+
+**O que a assinatura prova, e o que nao prova.** Prova que uma execucao de um workflow naquele
+caminho, neste repositorio, em runner do GitHub, assinou aqueles bytes, e que o executor da entrega
+nao a consegue forjar -- que e a separacao que a FR-006 exige e que o campo de estado nunca deu. Nao
+prova que passos esse workflow continha, porque o ficheiro do workflow viaja na branch verificada. A
+verificacao, por sua vez, permanece no cliente. Ambos os vectores estao enumerados na seccao
+correspondente, e o seu fecho -- trusted builder e required status check -- e decisao de topologia
+pendente do proprietario, registada em aberto em vez de afirmada como coberta.
 
 **Localizacao do controlo de ruleset.** Executa no `pre-push`, sob a credencial do operador. Limite
 declarado: protege exclusivamente operacoes originadas em estacao com o hook instalado e `gh`

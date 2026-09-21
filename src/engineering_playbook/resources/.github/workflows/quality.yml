@@ -84,3 +84,55 @@ jobs:
         run: uv run pytest
       - name: Verify
         run: uv run python scripts/verify.py
+  attest:
+    # THE JOB THAT HOLDS THE SIGNING IDENTITY RUNS NO CODE FROM THIS REPOSITORY.
+    #
+    # `id-token: write` puts ACTIONS_ID_TOKEN_REQUEST_URL and ACTIONS_ID_TOKEN_REQUEST_TOKEN into
+    # the environment of EVERY step of the job that declares it -- that is how the attest action
+    # reaches the identity at all. Declaring it on the `quality` job would put that token, and a
+    # `GITHUB_TOKEN` carrying `attestations: write`, in the same environment as `uv sync` (which
+    # runs dependency build hooks) and `pytest` (which runs this repository's own test code). One
+    # compromised dependency there could mint verdicts for content nobody measured. So the
+    # identity lives in this job instead, whose only steps are a checkout, one `git rev-parse`
+    # and the action itself.
+    #
+    # `needs:` is what makes the verdict mean anything: this job does not start until both
+    # batteries have passed, so a signature exists only for content that was measured. There is
+    # no `if: always()` and no `continue-on-error` anywhere above, so a failed check stops this.
+    #
+    # Only on `push`, and only on a public repository. A pull request from a fork never receives
+    # `id-token: write` whatever this block says, and attestations require a public repository or
+    # a plan that includes them. `attestation.repository_identity` asks GitHub the same visibility
+    # question on the reading side, so a repository that cannot mint a verdict is never gated on
+    # having one. `publish` pushes the branch before `merge` runs, so the branch tip a merge is
+    # about always gets a push run of its own.
+    runs-on: ubuntu-latest
+    needs: [delivery-policy, quality]
+    if: github.event_name == 'push' && github.event.repository.private == false
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          ref: ${{ github.sha }}
+      - name: Content verdict subject
+        # The subject format is written out in shell here, rather than by calling
+        # `scripts/attest.py`, ON PURPOSE: that script needs the package installed, and
+        # installing it would execute dependency build hooks in the one job that holds the
+        # signing identity -- exactly what this job exists to avoid. The duplication is guarded:
+        # `tests/unit/test_signed_verdict_leaves_the_tree.py` asserts these bytes are identical
+        # to `attestation.subject_bytes`, so the two copies cannot drift unnoticed.
+        #
+        # The tree comes from the commit, on a fresh checkout where nothing has run, so the bytes
+        # signed here name the content the batteries above measured.
+        run: |
+          tree="$(git rev-parse --verify HEAD^{tree})"
+          printf 'engineering-playbook/content-verdict/v1\ntree %s\n' "$tree" > "$RUNNER_TEMP/content-verdict.txt"
+      - name: Sign the content verdict
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-path: ${{ runner.temp }}/content-verdict.txt

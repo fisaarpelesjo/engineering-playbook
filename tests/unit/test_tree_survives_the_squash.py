@@ -105,9 +105,21 @@ def test_a_tree_recorded_before_the_squash_still_verifies_after_it(tmp_path: Pat
     )
 
 
-def test_a_tree_that_was_never_verified_is_still_rejected(tmp_path: Path) -> None:
-    """The other side: this is not a gate that has quietly stopped checking anything.
-    A `last_verified_tree` that matches neither HEAD nor a parent tree must still fail.
+def test_a_tree_that_was_never_verified_is_reported_and_no_longer_rejected(
+    tmp_path: Path,
+) -> None:
+    """This gate was removed on purpose, and the removal is the point of issue #24.
+
+    The tree survived the squash and did not survive the bookkeeping commit that records it:
+    writing the verdict changes the content the verdict is about, so `main` was red between
+    every pair of merges for a reason that carried no information (runs 35525340039 through
+    35553187426). FR-007 reclassifies both fields as a read cache; a cache that is behind is
+    reported, not failed.
+
+    What replaced it is a verdict signed by an identity the delivery executor cannot reach,
+    checked before integration and by any third party -- `test_signed_verdict_leaves_the_tree.py`
+    holds that suite, including the mutation test that fails when the signing step is removed.
+    Without that suite this test would be documenting a control that was simply deleted.
     """
     root = tmp_path / "repo"
     repo_with_a_squashed_branch(root)
@@ -115,8 +127,11 @@ def test_a_tree_that_was_never_verified_is_still_rejected(tmp_path: Path) -> Non
 
     result = verify_root(root)
 
-    assert any("Verified/converged state requires" in error for error in result.errors), (
-        f"the tree-based gate accepted a tree that never matched HEAD: {result.errors}"
+    assert not any("Verified/converged state requires" in error for error in result.errors), (
+        f"the state field is still gating, so main stays red between merges: {result.errors}"
+    )
+    assert any("last_verified_tree" in warning for warning in result.warnings), (
+        f"a cache that no longer covers HEAD must still be reported: {result.warnings}"
     )
 
 

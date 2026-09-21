@@ -444,7 +444,7 @@ class GhUnavailableError(RuntimeError):
     """
 
 
-def _run_gh(root: Path, *args: str) -> subprocess.CompletedProcess[str]:
+def run_gh(root: Path, *args: str) -> subprocess.CompletedProcess[str]:
     try:
         return subprocess.run(
             ["gh", *args],
@@ -464,7 +464,7 @@ def gh_capture(root: Path, *args: str) -> str:
     `gh auth login`/`GH_TOKEN`, rate-limited, `gh` off PATH) must never be read as "nothing to
     report" -- that would turn an unmeasured control green, which NFR-002 forbids.
     """
-    completed = _run_gh(root, *args)
+    completed = run_gh(root, *args)
     if completed.returncode != 0:
         raise GhUnavailableError(
             f"gh {' '.join(args)} saiu com {completed.returncode}: "
@@ -880,6 +880,83 @@ def collect_markdown(root: Path) -> str:
     return "\n".join(parts)
 
 
+def attestation_workflow_errors(workflow: dict[str, Any]) -> list[str]:
+    """What is wrong with how this workflow mints the conformance verdict, if anything.
+
+    Structure, not substring. A review of this slice planted a workflow with the attestation
+    steps MOVED ABOVE the battery and the old substring assertions passed it: `"attest-build-
+    provenance" in text` is satisfied by a workflow that signs content nothing measured. The
+    ordering is not decoration -- it is the part that makes the signature mean something -- so it
+    is read off the job graph here.
+
+    Three claims, each of which a mutation test can break individually (NFR-004, FR-017):
+
+    1. Exactly one job signs. Two signing jobs mean two answers to "who is the root of trust",
+       and the verifier pins one workflow path, not one job.
+    2. That job `needs` every other job. A signature minted while another job is still running,
+       or has failed, testifies to nothing; `needs` is what makes "after the battery" a property
+       of the graph rather than of the order someone typed the steps in.
+    3. That job, and only that job, holds `id-token: write` and `attestations: write`. Those
+       permissions put the OIDC request token into the environment of every step of the job that
+       declares them, so a job that also runs `uv sync` or `pytest` hands the signing identity to
+       dependency build hooks and to this repository's own test code.
+    """
+    errors: list[str] = []
+    jobs: dict[str, Any] = workflow.get("jobs") or {}
+
+    def steps_of(job: dict[str, Any]) -> list[dict[str, Any]]:
+        raw_steps: Any = job.get("steps") or []
+        return [cast(dict[str, Any], step) for step in raw_steps if isinstance(step, dict)]
+
+    signing_jobs = [
+        name
+        for name, job in jobs.items()
+        if any(
+            str(step.get("uses", "")).startswith("actions/attest-build-provenance@")
+            for step in steps_of(job)
+        )
+    ]
+    if len(signing_jobs) != 1:
+        return [
+            "CI must mint the signed conformance verdict in exactly one job "
+            f"(actions/attest-build-provenance), found {len(signing_jobs)}: {signing_jobs}"
+        ]
+
+    signing_job_name = signing_jobs[0]
+    signing_job: dict[str, Any] = jobs[signing_job_name]
+
+    raw_needs: Any = signing_job.get("needs") or []
+    declared_needs: list[str] = (
+        [raw_needs] if isinstance(raw_needs, str) else [str(name) for name in raw_needs]
+    )
+    missing = sorted(set(jobs) - {signing_job_name} - set(declared_needs))
+    if missing:
+        errors.append(
+            f"The signing job {signing_job_name!r} must declare needs on every other job, or it "
+            f"can sign content no battery measured. Missing: {missing}"
+        )
+
+    permissions: dict[str, Any] = signing_job.get("permissions") or {}
+    for required in ["id-token", "attestations"]:
+        if permissions.get(required) != "write":
+            errors.append(
+                f"The signing job {signing_job_name!r} must declare {required}: write, or no "
+                "verdict can be signed"
+            )
+    for name, job in jobs.items():
+        if name == signing_job_name:
+            continue
+        other: dict[str, Any] = job.get("permissions") or {}
+        leaked = [key for key in ["id-token", "attestations"] if other.get(key) == "write"]
+        if leaked:
+            errors.append(
+                f"Job {name!r} must not hold the signing identity ({leaked}): those permissions "
+                "reach every step of the job that declares them, including steps that run code "
+                "from this repository and from its dependencies"
+            )
+    return errors
+
+
 def verify_root(root: Path) -> CheckResult:
     result = CheckResult(errors=[], warnings=[])
     source_repository = (root / ".project/distribution.yml").exists()
@@ -977,46 +1054,43 @@ def verify_root(root: Path) -> CheckResult:
                 f"Status {state.get('status')} requires a blocker/reason",
             )
         if state.get("status") in {"verified", "converged", "done"}:
-            # THE VERDICT: TREE NOW, ATTESTATION LATER (issue #30, spec 003 FR-006/FR-007).
+            # THE VERDICT IS AN ATTESTATION (issue #24, spec 003 FR-006/FR-007, T208/T209).
             #
-            # `last_verified_commit` cannot survive a squash by construction: no commit can
-            # name the SHA that only exists once the squash creates it. Measured on runs
-            # 35526666891 and 35527933400: `git merge-base --is-ancestor <recorded>
-            # origin/main` answered NAO on main right after a clean squash merge. A commit is
-            # `tree + parent + author + message`; only the tree is a pure function of
-            # content. With this repository's ruleset requiring
-            # `strict_required_status_checks_policy: true` (a branch must be up to date with
-            # its base before merging), the squash GitHub creates has a tree identical to the
-            # branch tip that was actually verified -- so the tree, not the commit id, is
-            # what this gate compares.
+            # Two attempts to keep the verdict inside versioned content both failed, and they
+            # failed the same way. `last_verified_commit` cannot survive a squash: no commit
+            # can name the SHA that only exists once the squash creates it, so ancestry on
+            # `main` answered NAO for a value recorded on the branch (runs 35526666891 and
+            # 35527933400). `last_verified_tree` survives the squash but not the bookkeeping
+            # commit that writes it: measured on run 35535830710, the recorded tree was the
+            # code commit's and `main`'s HEAD tree was the one AFTER the record was committed.
+            # The general statement is short -- a record produced inside the transaction it
+            # describes falsifies what it asserts -- and it admits no in-tree fix, because the
+            # write is itself content. Eight consecutive push runs on `main` were red this way
+            # (35525340039 through 35553187426), and the red carried no information.
             #
-            # DECLARED LIMIT, on purpose: this closes the squash-survival mechanic. It does
-            # NOT satisfy FR-006. `last_verified_tree` is still written and read by the same
-            # actor that delivers the change -- there is no separation between the executor
-            # and the emitter of the verdict, and no proof a third party can check without
-            # trusting this file. That separation is the next slice, with a signed
-            # attestation (`actions/attest` or equivalent) under explicit owner authorization.
-            # `last_verified_commit` remains in the schema as an informative field only: it
-            # is still written for humans reading `.project/state.yml`, but nothing in this
-            # function gates on it any more.
+            # So the verdict left the tree. `.github/workflows/quality.yml` mints an
+            # attestation signed through the run's own OIDC identity, unreachable from any step
+            # a delivery executor controls, with the content digest as its subject
+            # (`attestation.py`). `delivery.command_merge` refuses content that has no such
+            # verdict, and `attest verify` answers the same question for a third party holding
+            # nothing but the repository (AC-004).
             #
-            # DERIVED PROJECTS WITHOUT CI (owner decision, same issue): a project declaring
-            # `ci: none` has no Actions workflow, therefore no workflow identity to trust
-            # even at this reduced level. Those projects keep the pre-existing
-            # commit/ancestry mechanism unchanged below.
+            # What remains below is NOT that verdict. `last_verified_commit` and
+            # `last_verified_tree` are a read cache (FR-007): written for a human reading
+            # `.project/state.yml`, reported when stale, gating nothing.
+            #
+            # DERIVED PROJECTS WITHOUT CI (owner decision, issue #30): a project declaring
+            # `ci: none` has no Actions workflow, therefore no workflow identity and no way to
+            # mint a verdict at all. Those projects keep the pre-existing commit/ancestry
+            # mechanism unchanged below -- FR-020, which requires exactly that this fix be
+            # declared as restricted to projects that have continuous integration rather than
+            # asserted universally.
             #
             # ONE PREDICATE, THREE READERS (issue #10): `accepted_verified_trees` below is the
             # only place "which trees still count as HEAD" is decided. `command_reconcile`
             # (commands.py) and `check_ci_receipt` (receipt.py, issue #9's CI receipt) call the
             # same function rather than each inlining their own comparison -- two readers of
             # `last_verified_tree` computing this differently is exactly how #10 happened.
-            # COVERAGE, stated plainly: this predicate proves the recorded tree is reachable as
-            # HEAD or a parent of HEAD RIGHT NOW, on THIS checkout. It does not prove the
-            # tree was ever actually built or tested by anyone -- that is what
-            # `last_verified_commit`/`last_verified_tree` being written and read by the same
-            # actor still does not give FR-006 (declared above), and what the CI receipt's own
-            # `tree` field does not give either: a receipt is self-reported by the same run
-            # that measured it, not attested by a third party.
             if derived_ci_none:
                 try:
                     accepted_commits = {git_head(root), *git_parents(root)}
@@ -1032,19 +1106,38 @@ def verify_root(root: Path) -> CheckResult:
                         "or one of its parent commits",
                     )
             else:
+                # FR-007, T209: THE FIELD IS A READ CACHE NOW, NOT THE VERDICT.
+                #
+                # Swapping the commit id for the tree closed the squash mechanics and did not
+                # close issue #24. Measured on run 35535830710, right after that slice landed:
+                # the recorded tree was the tree of the code commit, and `main`'s HEAD tree was
+                # the tree AFTER the bookkeeping commit that wrote the record. The commit that
+                # records the verdict changes the tree the verdict is about -- so no value
+                # written into versioned content can gate on covering that content, because the
+                # write is itself content. Eight consecutive push runs on `main` failed here
+                # (35525340039 through 35553187426), and the red carried no information.
+                #
+                # So this stops being a gate. The verdict that gates is the attestation minted
+                # by the workflow run (`attestation.py`, `.github/workflows/quality.yml`),
+                # signed through an identity no delivery step can reach, with the content digest
+                # as its subject. `delivery.command_merge` refuses to merge content that has no
+                # such verdict, and `attest verify` answers the same question for anyone at all
+                # (AC-004). A stale field below is now reported, because a reader benefits from
+                # knowing the cache is behind, and it fails nothing.
                 try:
                     accepted_trees = accepted_verified_trees(root)
                 except GitUnavailableError as failure:
-                    result.errors.append(
+                    result.warnings.append(
                         f"git nao respondeu, portanto last_verified_tree nao foi comparado: "
                         f"{failure}"
                     )
                 else:
-                    result.add(
-                        state.get("last_verified_tree") in accepted_trees,
-                        "Verified/converged state requires last_verified_tree to match "
-                        "HEAD's tree or the tree of one of its parent commits",
-                    )
+                    if state.get("last_verified_tree") not in accepted_trees:
+                        result.warnings.append(
+                            "last_verified_tree no longer covers HEAD or a parent of it. It is a "
+                            "read cache of the signed verdict (FR-007), not the verdict: run "
+                            "`attest verify` to ask whether this content has one."
+                        )
 
     if not source_repository:
         lock_path = root / ".project/playbook.lock.yml"
@@ -1131,6 +1224,10 @@ def verify_root(root: Path) -> CheckResult:
                 f"GitHub Actions must be pinned by full SHA: {action_ref}",
             )
         result.add("delivery-policy:" in workflow_text, "CI must include delivery-policy job")
+        # The mechanism FR-006 names, asserted against the job graph rather than against the
+        # file's text: see `attestation_workflow_errors` for why a substring match passed a
+        # workflow that signed content nothing had measured.
+        result.errors.extend(attestation_workflow_errors(load_yaml(workflow_path)))
         result.add("validate-ci --branch" in workflow_text, "CI must validate branch name")
         result.add("validate-ci --pr-title" in workflow_text, "CI must validate PR title")
 

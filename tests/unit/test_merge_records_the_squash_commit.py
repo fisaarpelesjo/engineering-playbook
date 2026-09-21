@@ -77,6 +77,25 @@ def args_for(root: Path) -> argparse.Namespace:
     return argparse.Namespace(root=root, auto=True, yes_remote=True)
 
 
+@pytest.fixture(autouse=True)
+def a_signed_verdict_covers_this_content(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Issue #24 added a precondition ahead of every merge: the content being integrated must
+    carry a verdict signed by the workflow identity (`delivery.signed_verdict_refusal`). These
+    tests are about what `merge` RECORDS once it runs, so that precondition is satisfied here
+    rather than exercised -- `test_signed_verdict_leaves_the_tree.py` owns the gate itself,
+    including the two ways it refuses.
+    """
+
+    def signed(_root: Path, tree: str, _slug: str | None = None) -> tuple[bool, str]:
+        return True, f"signed verdict for {tree}"
+
+    def public_repository(_root: Path) -> tuple[str, bool]:
+        return "owner/name", True
+
+    monkeypatch.setattr("engineering_playbook.delivery.attestation_covers_tree", signed)
+    monkeypatch.setattr("engineering_playbook.delivery.repository_identity", public_repository)
+
+
 def gh_fake_run(
     calls: list[list[str]],
     *,
@@ -89,7 +108,12 @@ def gh_fake_run(
 
     def fake(root: Path, cmd_args: list[str]) -> subprocess.CompletedProcess[str]:
         calls.append(cmd_args)
-        if cmd_args[:3] == ["gh", "pr", "view"] and "title,number" in cmd_args:
+        if cmd_args[:3] == ["gh", "pr", "view"] and "title,number,headRefOid" in cmd_args:
+            # `headRefOid` is deliberately absent from the payload: the gate then measures the
+            # local HEAD, which is what these tests check out. `headRefOid` being present and
+            # DIFFERENT is its own scenario, owned by
+            # test_signed_verdict_leaves_the_tree.py, in
+            # `test_the_gate_measures_the_head_the_server_will_integrate`.
             return subprocess.CompletedProcess(
                 cmd_args, 0, json.dumps({"title": "feat: example", "number": 1}), ""
             )
