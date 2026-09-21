@@ -13,6 +13,11 @@ jobs:
     permissions:
       contents: read
       issues: read
+      # Required by "Specification claims this code": the `pulls/<n>/files` endpoint is not
+      # covered by `contents: read`. Measured on run 35641532687, where the paginated list came
+      # back empty and the step refused rather than reporting on nothing -- the right direction,
+      # and a false red until this line existed.
+      pull-requests: read
       # Read-only, and required only by the "Ruleset reconciliation" step below: comparing
       # .github/rulesets/main.yml against the ruleset applied on the server needs `gh api
       # repos/:owner/:repo/rulesets`, which the default contents:read token cannot read.
