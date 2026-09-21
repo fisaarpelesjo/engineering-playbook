@@ -1213,6 +1213,125 @@ CODE_PREFIXES = (
 STATE_RELATIVE = STATE_FILE.replace("\\", "/")
 
 
+#: A specification directory as an issue names it: `specs/003-no-stage-without-a-mechanism`.
+SPEC_REFERENCE = re.compile(r"\bspecs/(\d{3}-[a-z0-9]+(?:-[a-z0-9]+)*)")
+
+
+def issue_payload(root: Path, number: int) -> dict[str, Any]:
+    """The issue as GitHub reports it, or a refusal to guess.
+
+    Raises `IssueLookupError` for the same reasons `issue_is_open` does: `gh` missing, no network,
+    no authentication. NFR-002 -- a chain that could not be read is not a chain that is intact.
+    """
+    completed = run(root, ["gh", "api", f"repos/:owner/:repo/issues/{number}"])
+    if completed.returncode != 0:
+        raise IssueLookupError(
+            f"gh api could not read issue #{number}: {completed.stderr.strip() or 'no stderr'}"
+        )
+    try:
+        payload: dict[str, Any] = json.loads(completed.stdout)
+    except json.JSONDecodeError as failure:
+        raise IssueLookupError(f"gh returned something that is not an issue: {failure}") from None
+    return payload
+
+
+def specification_named_by(body: str, root: Path) -> tuple[str | None, str | None]:
+    """The specification an issue names, and why it does not count when it does not.
+
+    Returns `(directory, problem)`. A body naming `specs/005-agent-throughput` when no such
+    directory exists resolves to nothing: measured on 2026-09-21, issue #28 names exactly that,
+    and the specification has not been written. A link to a document nobody wrote is the shape of
+    traceability without the substance.
+    """
+    match = SPEC_REFERENCE.search(body or "")
+    if match is None:
+        return None, None
+    directory = f"specs/{match.group(1)}"
+    if not (root / directory).is_dir():
+        return None, f"names {directory}, which does not exist in this repository"
+    return directory, None
+
+
+def traceability_refusal(root: Path, issue_number: int) -> str | None:
+    """Why this pull request is not connected to anything above it, or None when it is.
+
+    FR-013 / FR-015 / AC-009, coverage matrix stage 6. The chain the requirement asks for is
+    pull request -> sub-issue -> parent issue -> `specs/NNN/`, each link verified and the missing
+    one named. Until now only the first link existed: `issue_from_pr_body` plus `issue_is_open`
+    proved a card exists and is open, and nothing asked what the card belongs to.
+
+    HOW THE PARENT IS FOUND, measured rather than inferred. `GET /repos/:owner/:repo/issues/<n>`
+    carries `parent_issue_url` directly on a sub-issue's payload -- verified on 2026-09-21 against
+    issue #42, which returned the URL of #26. No walk over candidate parents is needed, and
+    `issues: read` already covers that endpoint.
+
+    THE TWO SHAPES THIS ACCEPTS, both measured in this repository's own board:
+
+    * a sub-issue whose parent names a specification that exists. Issue #26 names
+      `specs/003-no-stage-without-a-mechanism`, and every slice of that epic hangs from it.
+    * a standalone issue that names a specification itself.
+
+    AND THE ONE IT EXCUSES. A defect fix belongs to no epic and needs no specification: issues
+    #15, #36, #45 and #46 are all of that kind, and a rule refusing them would be a rule that gets
+    removed. Such a slice declares `no_spec_reason` in the state, the same sentence T213 already
+    asks for, rather than being silently exempt.
+
+    KNOWN BYPASS VECTORS, per FR-009:
+
+    * the link from an issue to a specification is a string in prose. Nothing stops an issue from
+      naming a specification it has nothing to do with; what is removed is naming none at all, or
+      naming one that does not exist.
+    * the parent relationship lives on GitHub, not in the tree, so it can be changed after the
+      fact without any commit. The check is a snapshot taken when the pull request runs.
+    """
+    try:
+        issue = issue_payload(root, issue_number)
+    except IssueLookupError as failure:
+        return (
+            f"ERROR: the chain above this pull request was not read, and a chain that could not "
+            f"be read is not a chain that is intact (NFR-002): {failure}"
+        )
+
+    parent_url = str(issue.get("parent_issue_url") or "")
+    if parent_url:
+        parent_number = parent_url.rsplit("/", 1)[-1]
+        try:
+            parent = issue_payload(root, int(parent_number))
+        except (IssueLookupError, ValueError) as failure:
+            return (
+                f"ERROR: issue #{issue_number} declares parent #{parent_number} and it was not "
+                f"read, so the chain is unverified (NFR-002): {failure}"
+            )
+        directory, problem = specification_named_by(str(parent.get("body") or ""), root)
+        if directory is not None:
+            return None
+        detail = problem or "names no specification at all"
+        return (
+            f"ERROR: the chain breaks at the parent. Pull request -> issue #{issue_number} -> "
+            f"parent issue #{parent_number}, which {detail}. FR-015: an issue mae sem "
+            "especificacao correspondente constitui falha de gate. Name the `specs/NNN-slug/` "
+            "this epic decomposes, in the parent issue's body."
+        )
+
+    directory, problem = specification_named_by(str(issue.get("body") or ""), root)
+    if directory is not None:
+        return None
+
+    state_path = root / STATE_FILE
+    state: dict[str, Any] = load_yaml(state_path) if state_path.is_file() else {}
+    if str(state.get("no_spec_reason") or "").strip():
+        return None
+
+    detail = problem or "has no parent issue and names no specification"
+    return (
+        f"ERROR: the chain breaks at the card. Issue #{issue_number} {detail}, so this pull "
+        "request connects to nothing above it. Either make it a sub-issue of the epic whose "
+        "specification it belongs to, or name the `specs/NNN-slug/` in its body, or declare "
+        f"`no_spec_reason` in {STATE_RELATIVE} -- a defect fix that belongs to no specification "
+        "is legitimate and says so."
+    )
+
+
 def spec_precedence_refusal(
     root: Path, changed_paths: list[str], declared_total: int | None = None
 ) -> str | None:
@@ -1361,6 +1480,11 @@ def command_validate_ci(args: argparse.Namespace) -> int:
                         "Link the pull request to an existing, open issue."
                     )
                     failed = True
+                else:
+                    broken = traceability_refusal(args.root, issue_number)
+                    if broken is not None:
+                        print(broken)
+                        failed = True
     if getattr(args, "pr_files", None) is not None:
         changed = [line.strip() for line in args.pr_files.splitlines() if line.strip()]
         if not changed:

@@ -334,12 +334,25 @@ def test_validate_ci_refuses_a_pull_request_whose_body_does_not_close_an_issue(
 def test_validate_ci_accepts_a_pull_request_that_closes_an_open_issue(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setattr(
-        "engineering_playbook.delivery.run",
-        fixed_run(stdout=json.dumps({"state": "OPEN"})),
-    )
-    exit_code = command_validate_ci(validate_ci_args("Closes #7", tmp_path))
-    assert exit_code == 0
+    """An open issue is now the first of two conditions, not the only one.
+
+    T212 added the rest of the chain -- the issue has to connect to a specification, through a
+    parent or by naming one. This test is about the issue being open, so the chain is satisfied
+    here rather than exercised; `tests/unit/test_the_chain_is_verified.py` owns it, including the
+    four ways it breaks.
+    """
+    spec_dir = tmp_path / "specs/003-no-stage-without-a-mechanism"
+    spec_dir.mkdir(parents=True)
+
+    def answers(_root: Path, command: list[str], **_kwargs: object) -> Any:
+        if command[:2] == ["gh", "api"]:
+            body = {"body": "Refs `specs/003-no-stage-without-a-mechanism/spec.md`."}
+            return subprocess.CompletedProcess(command, 0, json.dumps(body), "")
+        return subprocess.CompletedProcess(command, 0, json.dumps({"state": "OPEN"}), "")
+
+    monkeypatch.setattr("engineering_playbook.delivery.run", answers)
+
+    assert command_validate_ci(validate_ci_args("Closes #7", tmp_path)) == 0
 
 
 def test_validate_ci_refuses_a_pull_request_that_closes_a_nonexistent_issue(

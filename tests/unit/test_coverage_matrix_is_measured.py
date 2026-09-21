@@ -57,10 +57,7 @@ MATRIX_HEADER = "| # | Etapa | Classificacao | Requisito que a cobre |"
 #: Stages with no enforcement point, and the task that closes each, keyed by row number and a
 #: stable fragment of the stage's own text -- the pin is positional otherwise, and renumbering
 #: would silently repoint it at other stages.
-OPEN_STAGES: dict[int, tuple[str, str]] = {
-    6: ("Vinculo sub-issue", "T212"),
-    20: ("Cadeia de rastreabilidade", "T212"),
-}
+OPEN_STAGES: dict[int, tuple[str, str]] = {}
 
 #: Stages with a mechanism and a known bypass vector, pinned the same way so that leaving
 #: `ausente` means arriving somewhere equally declared rather than somewhere unexamined.
@@ -69,6 +66,7 @@ PARTIAL_STAGES: dict[int, tuple[str, str]] = {
     14: ("Execucao da bateria", "T203"),
     17: ("Verificacao do veredicto", "T208"),
     18: ("Sujeicao do agente", "T221"),
+    20: ("Cadeia de rastreabilidade", "T212"),
 }
 
 _ROW = re.compile(r"^\|\s*(\d+)\s*\|([^|]*)\|([^|]*)\|(.*)\|\s*$")
