@@ -78,12 +78,14 @@ DELIVERY = "src/engineering_playbook/delivery.py"
 CORE = "src/engineering_playbook/core.py"
 SKIP_POLICY = "tests/skip_policy.py"
 SPEC = "specs/003-no-stage-without-a-mechanism/spec.md"
+HOOK = ".claude/hooks/enforce_delivery_pipeline.py"
 
 START = "tests/unit/test_start_measures_its_base.py"
 CLAIMS = "tests/unit/test_code_names_its_spec.py"
 VERDICT = "tests/unit/test_signed_verdict_leaves_the_tree.py"
 SKIPS = "tests/unit/test_a_skip_is_declared.py"
 MATRIX = "tests/unit/test_coverage_matrix_is_measured.py"
+BASE = "tests/unit/test_one_base_one_meaning.py"
 
 # Long source fragments, named so the entries stay readable and the literals stay exact.
 BASE_CONTAINS_HEAD = '    if unmerged == "0":\n        return None'
@@ -118,6 +120,8 @@ SKIP_STALE = "    for nodeid in sorted(set(declared) - set(observed)):"
 #: No stage reads `ausente` any more -- AC-011 is satisfied -- so the fraud this mutation plants
 #: is the next one along: promoting a `parcial` stage to a closed classification by editing the
 #: word, which the PARTIAL_STAGES pin exists to refuse.
+REMOTE_REF_WINS = "    if git_ref_exists(root, remote_ref):\n        return remote_ref"
+HOOK_SEES_BRANCHES = "    if BRANCH_CREATION.search(command) or BRANCH_WRITE.search(command):"
 STAGE_TWENTY_PARTIAL = (
     "| 20 | Cadeia de rastreabilidade entre pull request e PRD | parcial, o elo ate ao "
 )
@@ -250,6 +254,24 @@ MUTATIONS: tuple[Mutation, ...] = (
         find=ONE_SIGNING_JOB,
         replace="    if False:",
         proves=(f"{VERDICT}::test_each_removal_from_the_signing_job_fails_verify",),
+    ),
+    Mutation(
+        mechanism="base means the ref the server will use",
+        requirement="FR-005, T219",
+        stage=9,
+        file=DELIVERY,
+        find=REMOTE_REF_WINS,
+        replace="    if False:\n        return remote_ref",
+        proves=(f"{BASE}::test_the_remote_ref_is_what_base_means",),
+    ),
+    Mutation(
+        mechanism="the harness refuses branch writes outside the pipeline",
+        requirement="FR-011, AC-007, T221",
+        stage=18,
+        file=HOOK,
+        find=HOOK_SEES_BRANCHES,
+        replace="    if False:",
+        proves=(f"{BASE}::test_branch_writes_are_refused[git switch -c feat/001-x]",),
     ),
     Mutation(
         mechanism="an undeclared skip fails the run",

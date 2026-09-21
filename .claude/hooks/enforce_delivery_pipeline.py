@@ -76,6 +76,24 @@ WRITE_VERB = re.compile(
 )
 GH_MERGE = re.compile(r"\bgh\s+pr\s+merge\b")
 
+# T221 / FR-011 / AC-007. Creating a branch is a write the pipeline records and this hook did not
+# see: measured on 2026-09-21, `git switch -c`, `git checkout -b` and `git branch <name>` were all
+# allowed, so the precondition T218 put into `start` -- refusing a HEAD the base already absorbed
+# -- was reachable around with a single command. `start` gained `--from-base` in that same slice,
+# which is what makes closing this vector possible without stranding an operator on an absorbed
+# HEAD with no way to reach the base.
+#
+# Listing stays allowed, and that is the whole difficulty: `git branch` with no argument, or with
+# only flags like `-a`, `-r`, `-v`, `--list`, `--show-current`, is how anyone looks at the
+# repository. Only a form that names something, or that moves or deletes, is a write.
+BRANCH_CREATION = re.compile(
+    r"\bgit\s+(?:-C\s+\S+\s+)?(?:switch|checkout)\s+[^|&;]*?(?:-c|-C|-b|-B|--create)\b"
+)
+BRANCH_WRITE = re.compile(
+    r"\bgit\s+(?:-C\s+\S+\s+)?branch\s+"
+    r"(?:-[dDmMc]\b|--delete\b|--move\b|--copy\b|--force\b|(?!-)\S)"
+)
+
 
 def decide(command: str) -> tuple[str, str] | None:
     """Return the refusal reason for `command`, or None to stay out of the way.
@@ -89,6 +107,15 @@ def decide(command: str) -> tuple[str, str] | None:
             "Run `uv run python scripts/delivery.py merge --auto --yes-remote`. It "
             "reads the merge result back from the pull request, records the squash "
             "commit as verified, and deletes the remote branch.",
+        )
+    if BRANCH_CREATION.search(command) or BRANCH_WRITE.search(command):
+        return (
+            "creating, moving or deleting a branch outside the delivery pipeline",
+            "Run `uv run python scripts/delivery.py start --type <t> --number <n> "
+            "--slug <s>` instead, with `--from-base` when the current HEAD is one the base "
+            "already absorbed. `start` measures that before the branch exists; a direct git "
+            "invocation does not, and a branch born from an absorbed HEAD only says so "
+            "later, as a conflicting pull request.",
         )
     match = WRITE_VERB.search(command)
     if match is None:
@@ -115,7 +142,8 @@ def main() -> int:
     command = tool_input.get("command", "") if isinstance(tool_input, dict) else ""
     if not isinstance(command, str) or not command.strip():
         return 0
-    if READ_ONLY.search(command) and WRITE_VERB.search(command) is None:
+    writes_branch = BRANCH_CREATION.search(command) or BRANCH_WRITE.search(command)
+    if READ_ONLY.search(command) and WRITE_VERB.search(command) is None and not writes_branch:
         return 0
     verdict = decide(command)
     if verdict is None:
