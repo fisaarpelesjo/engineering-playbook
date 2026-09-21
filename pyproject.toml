@@ -9,6 +9,17 @@ dependencies = [
   "jsonschema>=4.23.0",
 ]
 
+# `scripts/agent_watch/watch_grid.py` imports rich at runtime and exits with an install hint
+# when it is absent. Issue #15: it was neither installed nor declared, so nothing failed if
+# that import path rotted -- a rename in rich would have broken the grid view silently, with
+# no gate anywhere noticing. Declared here as optional because the stream view needs none of
+# it, and carried in the dev group below so the test suite can exercise the working path
+# rather than only the refusal.
+[project.optional-dependencies]
+watch = [
+  "rich>=13.7.0",
+]
+
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
@@ -21,6 +32,7 @@ dev = [
   "pytest>=8.3.0",
   "ruff>=0.6.0",
   "pyright>=1.1.380",
+  "rich>=13.7.0",
 ]
 
 [tool.hatch.build]
@@ -51,4 +63,12 @@ addopts = "-ra --strict-markers --strict-config"
 [tool.pyright]
 pythonVersion = "3.11"
 include = ["src", "scripts", "tests"]
+# `scripts/agent_watch` is not installed, and its tests import it as a namespace package under
+# `scripts/` -- which is NOT how its entry points import it: those insert their own directory
+# and import the bare top-level `subagent_feed`. `extraPaths` exists so pyright resolves the
+# spelling the tests use. `src` stays first for the reason below.
+# `src` stays first so `engineering_playbook` keeps resolving from source: adding `scripts`
+# alone made pyright resolve it from site-packages instead and report a missing stub file for
+# every module of this repository's own package.
+extraPaths = ["src", "scripts"]
 typeCheckingMode = "strict"
