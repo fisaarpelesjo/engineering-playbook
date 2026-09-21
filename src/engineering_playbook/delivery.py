@@ -580,6 +580,14 @@ def command_commit(args: argparse.Namespace) -> int:
             print(bookkeeping.stderr.strip())
             return bookkeeping.returncode
         print(bookkeeping.stdout.strip())
+        # The bookkeeping commit moves HEAD, which is exactly the condition
+        # `prepare_invalidated_by_own_checkpoint` reports -- measured on the first
+        # real use of this path, where `publish` then refused a prepare that had
+        # just been used successfully. The prepare follows HEAD here, so a step
+        # that only recorded what the previous step measured does not force the
+        # operator to repeat the one before it.
+        prepare["head"] = git_head(args.root)
+        write_yaml_atomic(args.root / PREPARE_FILE, prepare)
     return 0
 
 
