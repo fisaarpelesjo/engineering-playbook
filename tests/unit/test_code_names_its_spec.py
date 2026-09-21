@@ -312,3 +312,28 @@ def test_the_workflow_reads_the_field_the_api_actually_returns() -> None:
     assert ".[].filename" in step, (
         "the REST endpoint returns `filename`; `.path` yields empty lines for every file"
     )
+
+
+def test_verify_refuses_a_workflow_that_never_invokes_the_gate(tmp_path: Path) -> None:
+    """The gate is well tested as a function; this holds the line that makes it a gate.
+
+    Review measured that the mutation covering this assertion pointed at `tests/unit/test_core.py`,
+    which is already red inside the mutation sandbox -- so it reported a detection while measuring
+    nothing, and no test anywhere exercised the assertion. This is that test.
+    """
+    from engineering_playbook.core import verify_root
+
+    workflow = (Path(__file__).resolve().parents[2] / ".github/workflows/quality.yml").read_text(
+        encoding="utf-8"
+    )
+    root = tmp_path / "repo"
+    (root / ".github/workflows").mkdir(parents=True)
+    (root / ".github/workflows/quality.yml").write_text(
+        workflow.replace("validate-ci --pr-files", "validate-ci --nothing"), encoding="utf-8"
+    )
+
+    errors = verify_root(root).errors
+
+    assert any("specification claims the changed code" in error for error in errors), (
+        f"a workflow that never invokes the gate verified clean: {errors}"
+    )

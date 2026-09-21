@@ -114,6 +114,38 @@ jobs:
         run: uv run pytest
       - name: Verify
         run: uv run python scripts/verify.py
+  adversarial:
+    # DELIBERATELY NOT SHIPPED to derived projects: the copy under
+    # `src/engineering_playbook/resources/` has no `adversarial` job and `attest` there does
+    # not depend on one. This job runs `scripts/mutation.py` over an inventory of THIS
+    # repository's mechanisms; a derived project installs neither the script nor the module,
+    # so shipping the job would fail its first run and, because `attest` needs it, would stop
+    # the signed verdict being minted there at all (FR-020).
+    #
+    # T215/T216 / FR-017 / AC-012/AC-013: remove each mechanism, one at a time, and report
+    # whether anything noticed. Its own job because it runs the targeted tests once per entry
+    # and takes minutes -- long enough that folding it into `quality` would make every push pay
+    # for it, and a check people route around is a check that stops running.
+    #
+    # It reads the checkout and writes only under a temporary directory, so it cannot disturb
+    # what it measures. AC-013 asks for this in continuous integration rather than only on the
+    # author's workstation, which is what this job is.
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - name: Install uv
+        uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+        with:
+          version: "0.12.3"
+      - name: Sync
+        run: uv sync --locked
+      - name: Every mechanism is held by a test that fails without it
+        run: uv run python scripts/mutation.py
   attest:
     # THE JOB THAT HOLDS THE SIGNING IDENTITY RUNS NO CODE FROM THIS REPOSITORY.
     #
@@ -137,7 +169,7 @@ jobs:
     # having one. `publish` pushes the branch before `merge` runs, so the branch tip a merge is
     # about always gets a push run of its own.
     runs-on: ubuntu-latest
-    needs: [delivery-policy, quality]
+    needs: [delivery-policy, quality, adversarial]
     if: github.event_name == 'push' && github.event.repository.private == false
     permissions:
       contents: read
