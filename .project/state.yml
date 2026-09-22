@@ -1,5 +1,5 @@
 schema_version: 1.0.0
-updated_at: '2026-09-22T18:46:11Z'
+updated_at: '2026-09-22T19:03:16Z'
 active_workstream: WS-001
 current_branch: fix/064-no-stage-leaves-the-tree-dirty
 issue: 64
@@ -9,7 +9,7 @@ active_specification: specs/003-no-stage-without-a-mechanism/spec.md
 active_plan: specs/003-no-stage-without-a-mechanism/plan.md
 active_tasks: specs/003-no-stage-without-a-mechanism/tasks.md
 active_task: T226
-last_checkpoint: .project/checkpoints/CP-20260922-dafe12cb.yml
+last_checkpoint: .project/checkpoints/CP-20260922-231d9829.yml
 last_verified_commit: 48639d309ec5fffa78082e655afddd999282a29f
 validation:
   passed:
@@ -37,5 +37,5 @@ delivery:
   remote: origin
   pr_number: 74
   pr_url: https://github.com/fisaarpelesjo/engineering-playbook/pull/74
-  updated_at: '2026-09-22T18:54:20Z'
+  updated_at: '2026-09-22T19:10:55Z'
 last_verified_tree: 1ddfcf0eba1f0f19f6d8048516caafd2104be036
