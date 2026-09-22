@@ -85,6 +85,14 @@ if [ "$BRANCH" = "main" ] || [ "$BRANCH" = "master" ]; then
 
   What to do, without losing anything you already wrote:
 
+      uv run python scripts/delivery.py start --type <type> --number <n> --slug <slug>
+
+  That is the supported route: it measures the base before branching, records
+  where the branch came from, and the working tree comes with you. On a station
+  with the agent harness configured, the raw command below is refused by
+  \`.claude/hooks/enforce_delivery_pipeline.py\`; without that harness it still
+  works, and it is what \`start\` runs underneath:
+
       git switch -c <type>/<slug>      # the working tree comes with you
       git commit ...                   # and now it is born on the branch
 

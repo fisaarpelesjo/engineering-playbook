@@ -168,3 +168,56 @@ def test_a_second_start_replaces_the_record(tmp_path: Path) -> None:
     origin = load_yaml(root / ORIGIN_FILE)
     assert origin["branch"] == "fix/052-second"
     assert origin["override"] is None
+
+
+def test_the_two_flags_together_record_an_override_that_did_nothing(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """#61. `--allow-unmerged-head` with `--from-base` suppresses a check that had nothing to say:
+    the branch starts at the base, so there is no absorbed HEAD to carry.
+
+    The first version recorded `override: allow-unmerged-head` all the same, telling an audit a
+    risk was taken when none was. The second appended "(not exercised: --from-base)" to the value,
+    which fixed the meaning and broke the field: `override` stopped being something a reader can
+    compare against. Two fields now, and this test is what stops a third revision from quietly
+    dropping either one -- the correction to the first version had no test at all, which is the
+    same defect, one order of magnitude smaller, that this whole issue exists to record.
+    """
+    root = tmp_path / "repo"
+    repo_after_a_squash_merge(root)
+
+    assert command_start(start_args(root, allow_unmerged_head=True, from_base=True)) == 0
+    printed = capsys.readouterr().out
+
+    origin = load_yaml(root / ORIGIN_FILE)
+    assert origin["override"] == "allow-unmerged-head", "what the operator asked for is kept"
+    assert origin["override_exercised"] is False, "and it is recorded as having done nothing"
+    assert "has no effect together with --from-base" in printed, printed
+
+
+def test_an_override_that_did_something_says_so(tmp_path: Path) -> None:
+    """The other side, so the field above cannot be satisfied by always writing False."""
+    root = tmp_path / "repo"
+    repo_after_a_squash_merge(root)
+
+    assert command_start(start_args(root, allow_unmerged_head=True)) == 0
+
+    origin = load_yaml(root / ORIGIN_FILE)
+    assert origin["override"] == "allow-unmerged-head"
+    assert origin["override_exercised"] is True
+
+
+def test_status_reports_whether_the_override_was_exercised(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A field no command prints is a field the operator has to know to look for."""
+    root = tmp_path / "repo"
+    repo_after_a_squash_merge(root)
+    assert command_start(start_args(root, allow_unmerged_head=True, from_base=True)) == 0
+    capsys.readouterr()
+
+    assert command_status(status_args(root)) == 0
+    printed = capsys.readouterr().out
+
+    assert "branch_override: allow-unmerged-head" in printed, printed
+    assert "branch_override_exercised: False" in printed, printed

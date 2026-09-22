@@ -70,6 +70,50 @@ def test_a_write_verb_reached_through_a_compound_command_is_refused() -> None:
     assert permission("uv run pytest -q && git push origin main") == "deny"
 
 
+def test_a_global_option_before_the_verb_does_not_launder_a_write() -> None:
+    """#61. The branch guard was widened for exactly this and `WRITE_VERB` was left as it was, so
+    the older half of the same file still let `git -c a=b commit` through. Git accepts any number of
+    `-c k=v` before the verb, and it changes nothing about what the verb then does.
+    """
+    for command in (
+        "git -c user.email=x@example.com commit -m direct",
+        "git -c a=b -c c=d push origin main",
+        "git --no-pager merge origin/main",
+        'git "commit" -m direct',
+        # The first version of this test named the family and listed only the four options the
+        # pattern already admitted. Review ran the rest against real git: each of these produced
+        # a commit, a push or a reset with the guard saying nothing.
+        "git -p commit -m x",
+        "git --paginate push origin main",
+        "git --work-tree=. commit -m x",
+        "git --exec-path=/x reset --hard HEAD~1",
+        "git --git-dir=/x commit -m x",
+        "git --literal-pathspecs rebase origin/main",
+        # A redirection before the verb. `&` was read as a command separator by every rule in the
+        # hook, so `2>&1` truncated the scan and hid whatever followed. This gate -- T205, the
+        # first one this file ever had -- was open from the day it was written until the sixth
+        # round of review on issue #61 found it.
+        "git 2>&1 commit -m x",
+        "git 1>&2 push origin main",
+        "git &>log commit -m x",
+        "git 2>/dev/null reset --hard HEAD~1",
+    ):
+        assert permission(command) == "deny", f"the hook allowed {command!r}"
+
+
+def test_a_global_option_before_a_read_verb_is_still_left_alone() -> None:
+    """The other side of the same widening: `-c` is how anyone forces colour off in a script."""
+    for command in (
+        "git -c color.ui=false status",
+        "git --no-pager log --oneline -5",
+        "git -p log",
+        "git --git-dir=/x status",
+        "git status 2>&1",
+        "git log --oneline -5 > out.txt",
+    ):
+        assert permission(command) != "deny", f"the hook refused {command!r}, which only reads"
+
+
 def test_a_write_verb_inside_a_substitution_is_refused() -> None:
     assert permission('echo "$(git commit -m x)"') == "deny"
 

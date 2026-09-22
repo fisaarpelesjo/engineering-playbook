@@ -6,6 +6,7 @@
       "Bash(git merge:*)",
       "Bash(git rebase:*)",
       "Bash(git reset:*)",
+      "Bash(git update-ref:*)",
       "Bash(gh pr merge:*)"
     ]
   },

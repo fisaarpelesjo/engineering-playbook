@@ -123,7 +123,29 @@ SKIP_STALE = "    for nodeid in sorted(set(declared) - set(observed)):"
 #: word, which the PARTIAL_STAGES pin exists to refuse.
 ORIGIN_RECORDED = "    record_branch_origin(\n"
 REMOTE_REF_WINS = "    if git_ref_exists(root, remote_ref):\n        return remote_ref"
-HOOK_SEES_BRANCHES = "    if BRANCH_CREATION.search(command) or BRANCH_WRITE.search(command):"
+HOOK_SEES_BRANCHES = (
+    "    if branch_creation(command) or branch_write(command) or BRANCH_INDIRECT.search(command):"
+)
+#: The rule `git branch` is decided by. Review measured `git branch -q novo` creating a ref past
+#: the pattern this replaced, so the mechanism is the reading of the arguments, not the pattern.
+HOOK_READS_BRANCH_ARGUMENTS = "    return names > 0 and not listing"
+#: The measured prefix table. A wrong minimum here is not a syntax error and not a failing import:
+#: it silently lets `git switch --cr <name>` through, which is exactly how it shipped the first
+#: time. Raising `create` past its real minimum is the cheapest way to prove a test notices.
+HOOK_KNOWS_PREFIX_MINIMUMS = '    "create": 2,'
+#: The line that makes a listing option mean "the token beside it is a pattern". Removing it
+#: turns every `git branch --list <pattern>` into a refusal, which no enumerated case would
+#: necessarily notice -- the generated suite does, because it asks git what each option does.
+HOOK_HONOURS_LISTING = (
+    "        if head in _BRANCH_LIST_MODE:\n            listing = True\n"
+    "        if head in _BRANCH_CONSUMES_VALUE:"
+)
+PUBLISH_RESOLVES_BASE = (
+    "        commits_to_publish = local_commits(\n"
+    "            args.root, resolve_base(args.root, args.remote, args.base)\n"
+    "        )"
+)
+STATUS_RESOLVES_BASE = "        base_ref = resolve_base(args.root, args.remote, args.base)"
 STAGE_TWENTY_PARTIAL = (
     "| 20 | Cadeia de rastreabilidade entre pull request e PRD | parcial, o elo ate ao "
 )
@@ -267,6 +289,28 @@ MUTATIONS: tuple[Mutation, ...] = (
         proves=(f"{BASE}::test_the_remote_ref_is_what_base_means",),
     ),
     Mutation(
+        # Separate from the resolver entry above on purpose. #61 measured that reverting BOTH
+        # call sites left every one of the 480 tests the suite then had green: the resolver was
+        # covered, using it was
+        # not. A mechanism is where the decision is consumed, not only where it is computed.
+        mechanism="publish measures against the base the server will use",
+        requirement="FR-005, T219",
+        stage=9,
+        file=DELIVERY,
+        find=PUBLISH_RESOLVES_BASE,
+        replace="        commits_to_publish = local_commits(args.root, args.base)",
+        proves=(f"{BASE}::test_publish_refuses_work_the_server_already_has",),
+    ),
+    Mutation(
+        mechanism="status reports against the base the server will use",
+        requirement="FR-005, T219",
+        stage=9,
+        file=DELIVERY,
+        find=STATUS_RESOLVES_BASE,
+        replace="        base_ref = args.base",
+        proves=(f"{BASE}::test_status_counts_against_the_server_base",),
+    ),
+    Mutation(
         mechanism="the harness refuses branch writes outside the pipeline",
         requirement="FR-011, AC-007, T221",
         stage=18,
@@ -274,6 +318,47 @@ MUTATIONS: tuple[Mutation, ...] = (
         find=HOOK_SEES_BRANCHES,
         replace="    if False:",
         proves=(f"{BASE}::test_branch_writes_are_refused[git switch -c feat/001-x]",),
+    ),
+    Mutation(
+        # Separate from the entry above: that one removes the call, this one removes the decision
+        # the call consults. `git branch -q novo` creates a ref and looks nothing like a write,
+        # which is why the guard reads the arguments rather than matching their shape.
+        mechanism="branch arguments are read the way git reads them",
+        requirement="FR-011, AC-007, T221",
+        stage=18,
+        file=HOOK,
+        find=HOOK_READS_BRANCH_ARGUMENTS,
+        replace="    return False",
+        proves=(f"{BASE}::test_branch_writes_are_refused[git branch -q novo]",),
+    ),
+    Mutation(
+        mechanism="abbreviated long options are refused at git's own minimum",
+        requirement="FR-011, AC-007, T221",
+        stage=18,
+        file=HOOK,
+        find=HOOK_KNOWS_PREFIX_MINIMUMS,
+        replace='    "create": 6,',
+        proves=(f"{BASE}::test_branch_writes_are_refused[git switch --cr short-create]",),
+    ),
+    Mutation(
+        # Proved by the GENERATED suite rather than by an enumerated case, which is the point of
+        # that file: the cases come from `git branch --git-completion-helper` and from running
+        # each option, so a table that stops matching git fails without anyone having thought of
+        # the particular option that broke.
+        mechanism="listing options keep a pattern from reading as a branch name",
+        requirement="FR-011, AC-007, T221",
+        stage=18,
+        file=HOOK,
+        find=HOOK_HONOURS_LISTING,
+        replace=(
+            "        if False:\n            listing = True\n"
+            "        if head in _BRANCH_CONSUMES_VALUE:"
+        ),
+        # The node id is an ENUMERATED case, not a generated one, although the generated suite
+        # catches this too. A generated id carries the name of a git option, so a git that stops
+        # declaring `--list` would make this entry report `unusable` -- the coupling to git's
+        # naming that the generated file exists to remove, reintroduced by the inventory.
+        proves=(f"{BASE}::test_looking_at_the_repository_stays_allowed[git branch -l feat/*]",),
     ),
     Mutation(
         mechanism="a branch records how it came to exist",

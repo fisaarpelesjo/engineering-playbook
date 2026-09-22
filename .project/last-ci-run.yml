@@ -3,10 +3,10 @@
 # 'tree' sobrevive a um squash (issue #9); 'head' sozinho nao.
 schema_version: 1
 kind: local_ci_receipt
-ran_at: '2026-09-21T21:47:54Z'
-head: '1a7bf013a5b4384d185e8e075a1a56e23959046e'
-tree: '7f297f6f908c015335f4083197bcbdf44fb5d020'
-head_before_run: '1a7bf013a5b4384d185e8e075a1a56e23959046e'
+ran_at: '2026-09-22T02:05:11Z'
+head: 'c51933b4c7df1d0811166a1467939828b3258b86'
+tree: '338cd7ffccb7942555def8debfb68570dc57c0cf'
+head_before_run: 'c51933b4c7df1d0811166a1467939828b3258b86'
 tree_was_dirty_before_run: true
 tree_changed_during_run: false
 tree_was_dirty: true

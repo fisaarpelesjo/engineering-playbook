@@ -227,18 +227,32 @@ def resolve_base(root: Path, remote: str, base: str) -> str:
 
     WHICH ONE WINS, and why. The remote ref, when it exists. Integration happens on the server, so
     the base that matters is the server's -- `refs/heads/<base>` is whatever this checkout last
-    did locally, which after a squash merge is routinely behind and, in a worktree that never
-    checks `main` out, may not exist at all.
+    did locally, which after a squash merge is routinely behind and, in a clone made with
+    `--single-branch` or `--branch <slice>`, may not exist at all. (An earlier version of this
+    paragraph blamed worktrees. Wrong: worktrees of one repository share the ref store in the
+    common directory, so `refs/heads/main` is visible from all of them. Review caught it.)
 
-    THE FALLBACK IS DECLARED, not silent: with no remote-tracking ref, the local branch is used,
+    THE FALLBACK IS DECLARED, and `status` prints which ref it used so the declaration is not
+    only in this docstring: with no remote-tracking ref, the local branch is used,
     because a repository that has never fetched has nothing better and refusing every command
     there would be worse than answering from what is present. `start` is the exception and refuses
     instead, because creating a branch from an unmeasured base is the defect #36 recorded.
     """
+    if not remote or not base:
+        # `ValueError`, not a printed refusal, because every caller is inside this file and none
+        # takes these values from a user without a default. What review measured is that it
+        # reached the operator AS a traceback: the two commands below now catch it and print the
+        # same shape of refusal `unmerged_base_refusal` prints, so an empty `--remote` says what
+        # is wrong instead of showing a stack.
+        raise ValueError(f"remote and base cannot be empty (remote={remote!r}, base={base!r})")
     remote_ref = f"refs/remotes/{remote}/{base}"
     if git_ref_exists(root, remote_ref):
         return remote_ref
-    return base
+    # `refs/heads/<base>`, spelled in full, for the same reason `base_ref_name` does: a tag named
+    # `main` outranks the branch under DWIM resolution, and review built exactly that -- the
+    # fallback answered 0 unpublished commits where the branch had 2. Returning the bare name
+    # reopened a defect this repository had already paid for once.
+    return f"refs/heads/{base}"
 
 
 def local_commits(root: Path, base: str = "main") -> list[str]:
@@ -530,13 +544,27 @@ def unmerged_base_refusal(root: Path, remote: str, base: str) -> str | None:
       announces itself. It leaves no machine-readable trace, so an audit cannot later tell that a
       branch was born under it -- recorded as debt, task T220.
     - `git switch -c`, `git checkout -b` and `git branch` run directly, bypassing `start`
-      entirely. NOT mitigated, for an automated agent or for a human: the harness `PreToolUse`
-      control (FR-011) matches `commit|push|merge|rebase|reset`, and `branch` is on its read-only
-      list. Measured against `.claude/hooks/enforce_delivery_pipeline.py` during this slice's
-      review: `git switch -c feat/001-x`, `git checkout -b feat/001-x` and `git branch feat/001-x`
-      are all allowed. Closing it means widening that hook, which is task T221 rather than this
-      slice, because widening it without `--from-base` below would leave an operator no way to
-      reach the base at all.
+      entirely. MITIGATED on the configured station since T221, and widened by #61: the harness
+      `PreToolUse` control (FR-011) refuses branch creation and branch writes, including the
+      indirect forms (`worktree add -b`, `update-ref` and `symbolic-ref` on `refs/heads/`, a
+      `fetch` refspec that writes a local ref), a global option before the verb, and a quoted
+      verb. Measured on 2026-09-21 against `.claude/hooks/enforce_delivery_pipeline.py` over 151
+      forms: 81 writes refused and 70 reads allowed, the cases being in
+      `tests/unit/test_one_base_one_meaning.py`. Six rounds of independent review each measured
+      forms past the version before it, every one confirmed against real git, and each is a case
+      there now. The sixth found the widest: every rule in that file read `&` as a command
+      separator, so a `2>&1` truncated the scan and hid whatever followed -- including
+      `git 2>&1 commit -m x`, which walked through the oldest gate there from the day it was
+      written until that round. `branch` is decided by reading its
+      arguments rather than by matching a pattern, and which options put git into listing mode
+      was settled by running every option in its help text with a name beside it, because the
+      three that were classified by name were wrong about nine of them.
+
+      NOT mitigated anywhere else, which is why the matrix row reads `parcial` and not
+      `fechado`: the hook is harness configuration (FR-012), so a checkout without
+      `.claude/settings.json`, a different tool, or a shell reached around the harness writes
+      branches freely. The widening waited for `--from-base` below, without which an operator on
+      an absorbed HEAD would have had no way to reach the base at all.
     """
     if not remote or not base:
         return (
@@ -573,7 +601,12 @@ ORIGIN_FILE = ".project/delivery/branch-origin.yml"
 
 
 def record_branch_origin(
-    root: Path, branch: str, base_ref: str, started_from: str, override: str | None
+    root: Path,
+    branch: str,
+    base_ref: str,
+    started_from: str,
+    override: str | None,
+    override_exercised: bool,
 ) -> None:
     """Write how this branch came to exist, so a later reader does not have to take it on trust.
 
@@ -605,6 +638,12 @@ def record_branch_origin(
             "base_ref": base_ref,
             "started_from": started_from,
             "override": override,
+            # `--allow-unmerged-head` together with `--from-base` asks for nothing: the branch
+            # starts at the base, so the check the override suppresses had nothing to say.
+            # Recording it as used would tell an audit a risk was taken when none was; recording
+            # nothing would lose that the operator asked for it. Both facts, kept apart, because
+            # a value with a sentence appended stops being something a later reader can compare.
+            "override_exercised": override_exercised,
             "created_at": utc_now(),
         },
     )
@@ -618,7 +657,17 @@ def command_start(args: argparse.Namespace) -> int:
     if not validate_branch_name(branch):
         print(f"ERROR: invalid branch name: {branch}")
         return 1
-    if args.allow_unmerged_head:
+    if args.allow_unmerged_head and args.from_base:
+        # The two flags together ask for nothing: `--from-base` starts the branch at the base, so
+        # there is no unmerged HEAD to carry and the check the override suppresses had nothing to
+        # say. Recording it as "used" would tell an audit that a risk was taken when none was
+        # (review finding on the T220 slice).
+        print(
+            "NOTE: --allow-unmerged-head has no effect together with --from-base: the branch "
+            "starts at the base, so there is no HEAD the base has not integrated. Recorded as "
+            "not exercised."
+        )
+    elif args.allow_unmerged_head:
         print(
             "NOTE: --allow-unmerged-head. The base-containment check is being overridden, so "
             "this branch may replay history the base already integrated. Deliberate stacking is "
@@ -653,13 +702,19 @@ def command_start(args: argparse.Namespace) -> int:
     if completed.returncode != 0:
         print(completed.stderr.strip())
         return completed.returncode
+    # Two fields rather than one string with a sentence in it: `override` stays the enum that
+    # `status` and any later reader can compare against, and whether it did anything is its own
+    # boolean. Appending "(not exercised)" to the value made the field unparseable for the sake
+    # of being readable, which is the trade this repository keeps refusing elsewhere.
     override = "allow-unmerged-head" if args.allow_unmerged_head else None
+    override_exercised = bool(args.allow_unmerged_head) and not args.from_base
     record_branch_origin(
         args.root,
         branch,
         base_ref_name(args.remote, args.base) if args.from_base else "HEAD",
         started_from,
         override,
+        override_exercised,
     )
     print(branch)
     return 0
@@ -921,6 +976,9 @@ def command_publish(args: argparse.Namespace) -> int:
         )
     except GitUnavailableError as failure:
         print(f"ERROR: git nao respondeu, portanto os commits locais nao foram medidos: {failure}")
+        return 1
+    except ValueError as failure:
+        print(f"ERROR: {failure}. Nada foi publicado.")
         return 1
     if not commits_to_publish:
         print("ERROR: no local commit to publish.")
@@ -1250,6 +1308,12 @@ def command_status(args: argparse.Namespace) -> int:
         # Printed whichever way it went. An exception that only shows up when it was used reads,
         # to anyone scanning output, exactly like a line somebody forgot to look for.
         print(f"branch_override: {override or 'none'}")
+        if override:
+            exercised = origin.get("override_exercised")
+            print(
+                "branch_override_exercised: "
+                + (str(exercised) if exercised is not None else "unknown")
+            )
     if (args.root / PREPARE_FILE).exists():
         prepare = load_yaml(args.root / PREPARE_FILE)
         print(f"reviewer: {prepare.get('review', 'unknown')}")
@@ -1262,11 +1326,16 @@ def command_status(args: argparse.Namespace) -> int:
     print(f"pr: {delivery.get('pr_url', 'not recorded')}")
     print("ci: not queried")
     try:
-        commit_count = len(
-            local_commits(args.root, resolve_base(args.root, args.remote, args.base))
+        base_ref = resolve_base(args.root, args.remote, args.base)
+        commit_count = len(local_commits(args.root, base_ref))
+        fell_back = not base_ref.startswith("refs/remotes/")
+        print(
+            f"base_ref: {base_ref}" + (" (no remote-tracking ref; fell back)" if fell_back else "")
         )
     except GitUnavailableError as failure:
         print(f"local_commits: unmeasured (git nao respondeu: {failure})")
+    except ValueError as failure:
+        print(f"local_commits: unmeasured ({failure})")
     else:
         print(f"local_commits: {commit_count}")
     print("remote: not queried")

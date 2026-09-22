@@ -17,7 +17,15 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from engineering_playbook.mutation import MUTATIONS, run_all
 
-GLYPH = {"caught": "CAUGHT ", "escaped": "ESCAPED", "inert": "INERT  "}
+# `unusable` is the fourth verdict `mutation.classify` returns -- a baseline that was already
+# red, so the run proves nothing. It had no entry here, and the reporter of the NFR-004 gate
+# would have raised KeyError on the one outcome that means "do not trust this run".
+GLYPH = {
+    "caught": "CAUGHT  ",
+    "escaped": "ESCAPED ",
+    "inert": "INERT   ",
+    "unusable": "UNUSABLE",
+}
 
 
 def main() -> int:

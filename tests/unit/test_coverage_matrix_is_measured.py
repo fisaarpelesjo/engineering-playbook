@@ -300,3 +300,32 @@ def test_no_stage_is_left_without_a_mechanism(rows: list[Row]) -> None:
         )
 
     assert absent == []
+
+
+def test_the_matrix_reports_the_inventory_it_actually_has() -> None:
+    """#61. The mutation row claimed `14 de 14 apanhados` and `6 das 20 etapas -- 4, 6, 9, 15, 16,
+    17`. Measured against the inventory: 19 entries, reaching stages 4, 9, 15, 16, 17, 18, 20. The
+    cell named stage 6, which no entry has ever reached, and omitted 18 and 20, which two do.
+
+    Three wrong numbers in one sentence, in the table this file's own docstring calls "read by an
+    instrument, not by a reader" -- and no instrument read this part of it. The pins above hold
+    the classifications; nothing held the counts, so they drifted for five slices while the
+    inventory grew from 14 entries to 19.
+
+    `COVERED_STAGES` is derived from the inventory, so this comparison cannot be satisfied by
+    editing prose: adding an entry for a new stage makes the cell wrong until it is updated.
+    """
+    from engineering_playbook.mutation import COVERED_STAGES, MUTATIONS
+
+    text = SPEC.read_text(encoding="utf-8")
+    row = next(
+        line for line in text.splitlines() if "Mecanismo removido sem que nenhum teste" in line
+    )
+
+    stages = ", ".join(str(stage) for stage in sorted(COVERED_STAGES))
+    assert f"{len(MUTATIONS)} de {len(MUTATIONS)} apanhados" in row, (
+        f"the matrix does not report the inventory's size ({len(MUTATIONS)} entries): {row}"
+    )
+    assert f"{len(COVERED_STAGES)} das 20 etapas desta matriz -- {stages}" in row, (
+        f"the matrix does not report the inventory's reach (stages {stages}): {row}"
+    )
