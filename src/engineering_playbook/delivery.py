@@ -352,12 +352,39 @@ def ownership_allows(root: Path, files: list[str]) -> bool:
     return all(any(path == item or path.startswith(f"{item}/") for item in owned) for path in files)
 
 
+#: Everything the pipeline writes ABOUT itself rather than about the work: the state file, the
+#: last CI run it observed, and the checkpoints it appends. Nothing here is ever authored by the
+#: operator, which is what makes it safe to stage on their behalf.
+BOOKKEEPING_PATHS = (
+    ".project/state.yml",
+    ".project/last-ci-run.yml",
+    ".project/checkpoints",
+)
+
+
+def is_bookkeeping(path: str) -> bool:
+    """True when `path` IS one of the pipeline's own records, by path boundary and not by prefix.
+
+    `str.startswith` on the bare tuple was the first version of this, and review broke it with four
+    real paths. `.project/state.yml.bak`, `.project/last-ci-run.yml.orig`,
+    `.project/checkpointsX.txt` and `.project/checkpoints-archive/secret.yml` each begin with a
+    listed string without being one of these files, and each was committed -- and pushed -- inside
+    a bookkeeping commit, while the docstring above `commit_bookkeeping` claimed that anything
+    unrelated would be refused.
+
+    The same comparison is already written correctly 500 lines above, in `ownership_allows`: a path
+    matches an entry when it IS that entry or lives UNDER it. There is no reason for this module to
+    hold two answers to that question, so this is the only one.
+    """
+    return any(path == item or path.startswith(f"{item}/") for item in BOOKKEEPING_PATHS)
+
+
 def prepare_invalidated_by_own_checkpoint(
     root: Path, recorded_head: str, current_head: str
 ) -> bool:
     """True when every commit between `recorded_head` and `current_head` only touched
-    the bookkeeping paths `prepare` itself produces -- `.project/checkpoints/` (via the
-    `scripts/checkpoint.py` call `command_prepare` makes) and `.project/state.yml`.
+    `BOOKKEEPING_PATHS` -- the records the pipeline writes about itself, via the
+    `scripts/checkpoint.py` call `command_prepare` makes and the state it then records.
 
     This is issue #13's exact shape: `prepare` records `head`, then generates a
     checkpoint; if that checkpoint is later committed on its own, HEAD moves for a
@@ -379,7 +406,13 @@ def prepare_invalidated_by_own_checkpoint(
     paths = [line for line in changed.splitlines() if line.strip()]
     if not paths:
         return False
-    return all(path.startswith(".project/checkpoints/") or path == STATE_FILE for path in paths)
+    # Derived from `BOOKKEEPING_PATHS` rather than spelled again. The two disagreed: this one
+    # accepted only `.project/checkpoints/` and `STATE_FILE`, so once `publish` began folding
+    # `.project/last-ci-run.yml` into the same commit -- the file the issue's own measurement lists
+    # as dirty -- `prepare_is_fresh` fell back to the generic "HEAD changed" instead of the FR-002
+    # message that names the cause and the way out. `core.py` already carries a capitalised note
+    # about one predicate and three readers, from issue #10; this is that shape inside one file.
+    return all(is_bookkeeping(path) for path in paths)
 
 
 def prepare_is_fresh(root: Path) -> tuple[bool, str]:
@@ -940,6 +973,78 @@ def require_remote_authorization(args: argparse.Namespace) -> bool:
     return True
 
 
+def commit_bookkeeping(root: Path, subject: str) -> tuple[int, bool]:
+    """Fold the pipeline's own records into a commit of their own. Returns (exit code, committed).
+
+    ISSUE #64, and the same class as #12 one stage later. `commit` has folded its state write into
+    a second commit since T303/FR-001; `publish` did not, so it wrote `.project/state.yml` and a
+    new checkpoint AFTER pushing and left them uncommitted. That dirt is not cosmetic: `start`
+    refuses a dirty tree, correctly, so the pipeline was blocking its own next slice, and the way
+    out was `--allow-dirty`, committing by hand with an invented message, or discarding what the
+    pipeline had just written. The first carries the dirt into the next slice rather than removing
+    it; the other two happened twice each while delivering #61.
+
+    It also broke something else, measured rather than predicted: `merge` cannot pass
+    `--delete-branch` to `gh pr merge`, because that makes `gh` check out the base branch locally
+    and the checkout failed with "Your local changes would be overwritten" -- on a tree dirtied by
+    `publish`, not by anything `merge` did. See the comment in `command_merge`.
+
+    ONLY `BOOKKEEPING_PATHS` ARE STAGED, and anything else already staged is a refusal rather than
+    a silent inclusion. A command that stages on the operator's behalf must not be able to sweep
+    work they had not chosen to commit into a commit they did not write the message for.
+    """
+    already_staged = run(root, ["git", "diff", "--cached", "--name-only"])
+    if already_staged.returncode != 0:
+        print(already_staged.stderr.strip())
+        return already_staged.returncode, False
+    unrelated = [
+        name
+        for name in already_staged.stdout.split("\n")
+        if name.strip() and not is_bookkeeping(name)
+    ]
+    if unrelated:
+        print(
+            "ERROR: refusing to write a bookkeeping commit while other changes are staged: "
+            + ", ".join(sorted(unrelated))
+            + ". Commit or unstage them first -- this step writes only the pipeline's own "
+            "records, and it will not put your work in a commit whose message you did not write."
+        )
+        return 1, False
+    # `git add -- <path>` exits 128 on a pathspec that matches nothing, and a repository with no
+    # checkpoints yet, or no observed CI run yet, is an ordinary state rather than a failure.
+    present = [name for name in BOOKKEEPING_PATHS if (root / name).exists()]
+    if not present:
+        return 0, False
+    staged = run(root, ["git", "add", "--", *present])
+    if staged.returncode != 0:
+        print(staged.stderr.strip())
+        return staged.returncode, False
+    pending = run(root, ["git", "diff", "--cached", "--name-only"])
+    if pending.returncode != 0:
+        print(pending.stderr.strip())
+        return pending.returncode, False
+    if not pending.stdout.strip():
+        # Nothing to record. An empty commit here would be a commit nobody needed, which is the
+        # same nuisance in the other direction.
+        return 0, False
+    recorded = [name for name in pending.stdout.split("\n") if name.strip()]
+    # `command_commit` refuses on secrets before creating a commit, and this commit is pushed just
+    # like that one. Review measured that nothing here paid that cost: `scan_for_secrets` lived
+    # only inside `command_commit`, so anything reaching the index through the prefix hole above
+    # went to the remote unscanned. The boundary rule closes the hole; this closes the consequence.
+    if scan_for_secrets(root, recorded):
+        print(
+            "ERROR: the pipeline's own records contain possible secrets, so nothing was committed."
+        )
+        return 1, False
+    committed = run(root, ["git", "commit", "-m", subject])
+    if committed.returncode != 0:
+        print(committed.stderr.strip())
+        return committed.returncode, False
+    print(committed.stdout.strip())
+    return 0, True
+
+
 def command_publish(args: argparse.Namespace) -> int:
     if not require_remote_authorization(args):
         return 1
@@ -1047,6 +1152,31 @@ def command_publish(args: argparse.Namespace) -> int:
         "updated_at": utc_now(),
     }
     write_yaml_atomic(state_path, state)
+    # ISSUE #64. Everything above this line -- the checkpoint written before the push, and the
+    # delivery record that cannot be written until GitHub has answered with a pull request number
+    # -- used to be left modified-but-uncommitted, and `start` then refused the next slice.
+    #
+    # The second push is the accepted cost of the symmetry, declared rather than discovered: the
+    # bookkeeping commit moves the branch head, so the pull request updates and CI runs once more.
+    # The alternative was an exception in `start` for paths it has to trust, and an exception in a
+    # gate is not a fix for the cause.
+    code, committed = commit_bookkeeping(
+        args.root, f"chore(delivery): record the publish of {branch}"
+    )
+    if code != 0:
+        return code
+    if committed:
+        # The prepare follows HEAD as soon as the commit exists, and BEFORE the push. Written after
+        # the push, a network failure left the commit made, HEAD moved and the prepare pinned to a
+        # commit that is no longer HEAD -- so the next `publish` refused a prepare that was stale
+        # for a reason the operator did not cause, and told them to run `prepare` again. The same
+        # trap `command_commit` hit when T303 landed, in the failure path rather than the happy one.
+        prepare["head"] = git_head(args.root)
+        write_yaml_atomic(args.root / PREPARE_FILE, prepare)
+        push_bookkeeping = run(args.root, ["git", "push", remote, branch])
+        if push_bookkeeping.returncode != 0:
+            print(push_bookkeeping.stderr.strip())
+            return push_bookkeeping.returncode
     return 0
 
 

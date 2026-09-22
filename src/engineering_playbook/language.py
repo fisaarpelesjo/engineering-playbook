@@ -131,8 +131,11 @@ NOT_PROSE = re.compile(
 #: Double-quoted spans, stripped ONLY from prose. In an issue body or a Markdown document `"` is a
 #: quotation mark, and review measured a real pull request body refused for naming this
 #: repository's own ledger section in ordinary English. In Python, YAML and JSON `"` is a string
-#: delimiter, and 145 of the 254 text files this guard reads carry one of those three suffixes --
-#: 80 `.py`, 50 `.yml`, 15 `.json` -- against 99 of `.md`. The number that stood here was 195,
+#: delimiter, and 146 of the 255 text files this guard reads carry one of those three suffixes,
+#: against 99 of `.md`. Re-measured here after the last edit of the slice that changed it: adding
+#: one `.py` file moved both halves, and the previous pair, 145 of 254, was left behind.
+#:
+#: The number that stood here before that was 195,
 #: which no reading of the tree reproduces; it was written from memory in the paragraph explaining
 #: why hand-written numbers had just been removed from this file.
 #:
