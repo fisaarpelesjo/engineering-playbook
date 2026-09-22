@@ -55,24 +55,14 @@ import sys
 from dataclasses import dataclass
 from pathlib import Path
 
-#: Copied into each sandbox. `README.md`, `REVIEW.md`, `docs`, `templates` and `uv.lock` are here
-#: because `verify_root` and the CLI reach for them: without them the sandbox starts red, which is
-#: exactly the condition that made a meaningless result look like a detection.
-SANDBOX_CONTENTS = (
-    "src",
-    "tests",
-    "scripts",
-    ".github",
-    "specs",
-    ".project",
-    ".claude",
-    "docs",
-    "templates",
-    "profiles",
-)
-SANDBOX_FILES = ("pyproject.toml", "uv.lock", "README.md", "REVIEW.md", "ENGINEERING.md")
-#: Not copied: 80-odd checkpoint files no target reads.
-SANDBOX_IGNORES = ("__pycache__", "*.pyc", ".pytest_cache", "CP-*.yml")
+#: Gitignored scratch that must not reach the sandbox: the prepare receipt, the pull request body,
+#: the branch origin record. It made the language guard report a file that is not in the repository
+#: at all, so a clean sandbox was red before any mutation was applied.
+#:
+#: Matched by PATH, not by name. `shutil.ignore_patterns` compares basenames, and `delivery` is
+#: also the name of `docs/delivery/` -- ignoring the name dropped a documentation directory from
+#: the sandbox and made the inventory look stale there. Measured, one edit after the first attempt.
+SANDBOX_IGNORED_PATHS = (".project/delivery",)
 
 DELIVERY = "src/engineering_playbook/delivery.py"
 CORE = "src/engineering_playbook/core.py"
@@ -87,6 +77,36 @@ SKIPS = "tests/unit/test_a_skip_is_declared.py"
 MATRIX = "tests/unit/test_coverage_matrix_is_measured.py"
 BASE = "tests/unit/test_one_base_one_meaning.py"
 MIRROR = "tests/unit/test_resource_mirror_parity.py"
+GUARD = "tests/unit/test_the_repository_speaks_one_language.py"
+CHAIN = "tests/unit/test_the_chain_is_verified.py"
+#: The line that decides a piece of text is Portuguese, in the shared detector both guards call.
+#: Raising the threshold is the cheapest way to make them measure nothing while still passing:
+#: at three markers a line, the whole inventory reads as already translated.
+LANGUAGE = "src/engineering_playbook/language.py"
+LANGUAGE_THRESHOLD = "    return len(portuguese_markers(text, prose=prose)) >= threshold"
+
+#: The morphology alternative, which is what reaches accent-stripped Portuguese written in content
+#: words. Neutering it takes the detector back to a word list.
+#:
+#: It is replaced by an EMPTY pattern fragment rather than deleted. Deleting the line leaves the
+#: string literal above it without its trailing comma, so the module stops importing and every
+#: target errors on collection -- which this harness reported as `escaped`. That verdict is red,
+#: so the entry failed closed rather than passing silently, but it measured nothing: a mutant that
+#: does not run cannot show that a test would have caught it. An empty fragment concatenates
+#: harmlessly and removes exactly the rule under test, and nothing else.
+LANGUAGE_MORPHOLOGY = r'    r"|(?<![\w.-])\w{4,}(?:coes|cao|dade|dades|ncia|ncias|mente)(?![\w-])",'
+
+#: The floor below which the density rule is not consulted. Raising it to 2 is the exact edit that
+#: shipped for one review round and silently removed a file from the inventory.
+LANGUAGE_FLOOR = "DENSITY_FLOOR_MARKERS = 1"
+#: The claim-versus-structure comparison. Removing it leaves a control that checks a parent
+#: exists -- which `traceability_refusal` already does -- and stops checking that the parent
+#: the body advertises is the one the API reports.
+ISSUE_CLAIM_CHECKED = "    if claim is not None and claim.group(1) != actual:"
+#: The line in `verify_root` that makes the contract check a STEP and not just a function.
+#: Review measured that deleting the step from both copies of the workflow left the whole
+#: suite green, which is the same gap T213 closed for `--pr-files` one slice earlier.
+CONTRACT_STEP_REQUIRED = '            "validate-ci --issue-contract-body" in workflow_text,'
 #: The two files whose fidelity the mirror guard exists to protect. Perturbing them is how the
 #: guard is removed for the purposes of this inventory: there is nothing to delete from the test
 #: itself that would make it FAIL -- excluding a path makes it pass -- so what is removed here is
@@ -447,6 +467,57 @@ MUTATIONS: tuple[Mutation, ...] = (
         ),
     ),
     Mutation(
+        # Same shape as the matrix guard below: the language guard IS a test, so what gets mutated
+        # is the rule it applies. At three markers a line, every file in the inventory reads as
+        # translated and the inventory's second half -- the one that refuses a stale name -- fires.
+        mechanism="a file that still speaks Portuguese stays named",
+        requirement="FR-016, #65",
+        stage=11,
+        file=LANGUAGE,
+        find=LANGUAGE_THRESHOLD,
+        replace="    return len(portuguese_markers(text, prose=prose)) >= threshold + 1",
+        proves=(f"{GUARD}::test_a_translated_file_leaves_the_inventory",),
+    ),
+    Mutation(
+        # The inventory cannot hold either of the next two. It is regenerated FROM the detector, so
+        # weakening the detector shrinks the inventory, the pin is updated to match, and the
+        # shrinking reads as translation progress. What holds them is a fixed corpus of real lines.
+        mechanism="the detector reaches Portuguese no word list can hold",
+        requirement="FR-016, #65",
+        stage=11,
+        file=LANGUAGE,
+        find=LANGUAGE_MORPHOLOGY,
+        replace='    r"",',
+        proves=(f"{GUARD}::test_the_detector_still_catches_what_it_was_built_to_catch",),
+    ),
+    Mutation(
+        mechanism="one marker in a short file is still a marker",
+        requirement="FR-016, #65",
+        stage=11,
+        file=LANGUAGE,
+        find=LANGUAGE_FLOOR,
+        replace="DENSITY_FLOOR_MARKERS = 2",
+        proves=(f"{GUARD}::test_the_detector_still_catches_what_it_was_built_to_catch",),
+    ),
+    Mutation(
+        mechanism="an issue may not claim a parent the API does not report",
+        requirement="FR-013, FR-015, #65",
+        stage=6,
+        file=DELIVERY,
+        find=ISSUE_CLAIM_CHECKED,
+        replace="    if False:",
+        proves=(f"{CHAIN}::test_a_parentage_claim_the_api_does_not_confirm_is_refused",),
+    ),
+    Mutation(
+        mechanism="CI must invoke the card-conforms-to-the-contract gate",
+        requirement="FR-013, FR-015, #65",
+        stage=6,
+        file=CORE,
+        find=CONTRACT_STEP_REQUIRED,
+        replace="            True,",
+        proves=(f"{CLAIMS}::test_verify_refuses_a_workflow_that_never_invokes_the_contract_gate",),
+    ),
+    Mutation(
         # The matrix guard IS a test, so removing it to prove it would be circular. What gets
         # mutated is the DATA it reads: a stage closed by editing prose, which is the fraud the
         # guard exists to refuse (#39).
@@ -480,23 +551,56 @@ class MutationResult:
 
 
 def build_sandbox(root: Path, sandbox: Path) -> None:
-    """Copy what the targets need, and refuse quietly missing pieces.
+    """Copy what git tracks, minus the scratch that is not part of the repository.
 
-    A silently incomplete sandbox starts red, and a red baseline is what let a meaningless result
-    read as a detection.
+    THIS USED TO BE AN ALLOWLIST -- a tuple of directories and a tuple of root files, "what the
+    targets need". It failed three times in one slice, each time the same way and each time
+    silently: a root file the language guard reads was missing, so its inventory looked already
+    translated; the checkpoints were dropped, so an exclusion audit found nothing to audit; and
+    `extensions/` was never listed at all. Every one of those made a clean sandbox RED before any
+    mutation was applied, which the harness reports as `unusable` -- a run that proves nothing.
+
+    A list of what the targets need has to be edited whenever a target starts needing more, and
+    nothing says when that happened. `git ls-files` needs no maintenance and matches what
+    `actions/checkout` hands CI, which is the tree these results are supposed to describe.
+
+    Scratch is excluded by path, not by name: `.project/delivery/` is gitignored anyway, but the
+    fallback walk in the language guard would find it, and `delivery` is also the name of
+    `docs/delivery/` -- ignoring the NAME dropped a documentation directory and made the inventory
+    look stale there. Measured, one edit after the first attempt.
     """
     sandbox.mkdir(parents=True, exist_ok=True)
-    ignore = shutil.ignore_patterns(*SANDBOX_IGNORES)
-    for name in SANDBOX_CONTENTS:
-        source = root / name
-        if not source.is_dir():
-            raise FileNotFoundError(f"the sandbox declares {name}/ and the repository has none")
-        shutil.copytree(source, sandbox / name, dirs_exist_ok=True, ignore=ignore)
-    for name in SANDBOX_FILES:
+    listed = subprocess.run(
+        ["git", "ls-files"], cwd=root, capture_output=True, text=True, check=True
+    ).stdout.split("\n")
+    tracked = [line.strip() for line in listed if line.strip()]
+    missing: list[str] = []
+    if len(tracked) < 200:
+        raise FileNotFoundError(
+            f"git lists only {len(tracked)} tracked files under {root}; a sandbox built from that "
+            "would be silently incomplete, which is the condition that makes a meaningless result "
+            "read as a detection"
+        )
+    for name in tracked:
+        if any(name.startswith(prefix) for prefix in SANDBOX_IGNORED_PATHS):
+            continue
         source = root / name
         if not source.is_file():
-            raise FileNotFoundError(f"the sandbox declares {name} and the repository has none")
-        shutil.copy2(source, sandbox / name)
+            missing.append(name)
+            continue
+        destination = sandbox / name
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(source, destination)
+
+    # The allowlist this replaced raised on a missing piece; the first version of the rewrite
+    # skipped it silently, which is the property the rewrite existed to remove. A file git tracks
+    # and the working tree does not have is ordinary mid-slice -- deleted and not yet staged --
+    # and it degrades the sandbox to `unusable`, safely but without saying so.
+    if missing:
+        raise FileNotFoundError(
+            f"git tracks {len(missing)} file(s) the working tree does not have, so this sandbox "
+            f"would be a copy of neither: {sorted(missing)[:5]}"
+        )
 
 
 def apply_mutation(sandbox: Path, mutation: Mutation) -> str | None:
@@ -510,17 +614,25 @@ def apply_mutation(sandbox: Path, mutation: Mutation) -> str | None:
     # mutation. Harmless while every target was a `.py` or `.md` compared by meaning; not
     # harmless now that entries exist whose target compares bytes.
     # `Path.read_text` only grew a `newline` parameter in 3.13 and this project targets 3.11,
-    # so the handle is opened explicitly.
+    # so the handle is opened explicitly. `newline=""` keeps the file's own terminators, which is
+    # what stops this write from rewriting every line -- and it is only half the job: the `find`
+    # literals in the inventory are written with `\n`, so on a CRLF working tree, which is the
+    # ordinary state of a Windows checkout, no multi-line literal would match and every entry
+    # carrying one would report `inert`. Measured here on 2026-09-22, after the #49 fix did the
+    # preserving half alone.
+    #
+    # So: read raw, match on a normalised copy, write back through the file's own terminator.
     with target.open("r", encoding="utf-8", newline="") as handle:
-        text = handle.read()
+        raw = handle.read()
+    terminator = "\r\n" if "\r\n" in raw else "\n"
+    text = raw.replace("\r\n", "\n")
     occurrences = text.count(mutation.find)
     if occurrences == 0:
         return "the text this entry removes is no longer in the file"
     if occurrences > 1:
         return f"the text this entry removes occurs {occurrences} times, so it is not one control"
-    target.write_text(
-        text.replace(mutation.find, mutation.replace, 1), encoding="utf-8", newline=""
-    )
+    with target.open("w", encoding="utf-8", newline=terminator) as handle:
+        handle.write(text.replace(mutation.find, mutation.replace, 1))
     return None
 
 

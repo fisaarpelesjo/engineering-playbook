@@ -337,3 +337,29 @@ def test_verify_refuses_a_workflow_that_never_invokes_the_gate(tmp_path: Path) -
     assert any("specification claims the changed code" in error for error in errors), (
         f"a workflow that never invokes the gate verified clean: {errors}"
     )
+
+
+def test_verify_refuses_a_workflow_that_never_invokes_the_contract_gate(tmp_path: Path) -> None:
+    """#65. `issue_contract_problems` is covered as a function; this covers it being CALLED.
+
+    Review measured the gap by deleting the step from both copies of `quality.yml` and running the
+    whole suite: 732 passed, unchanged. The mechanism this slice exists to add could be removed
+    without a single test noticing -- the class the slice was opened to close, inside the slice.
+    """
+    from engineering_playbook.core import verify_root
+
+    workflow = (Path(__file__).resolve().parents[2] / ".github/workflows/quality.yml").read_text(
+        encoding="utf-8"
+    )
+    root = tmp_path / "repo"
+    (root / ".github/workflows").mkdir(parents=True)
+    (root / ".github/workflows/quality.yml").write_text(
+        workflow.replace("validate-ci --issue-contract-body", "validate-ci --nothing"),
+        encoding="utf-8",
+    )
+
+    errors = verify_root(root).errors
+
+    assert any("card conforms to the contract" in error for error in errors), (
+        f"a workflow that never invokes the contract gate verified clean: {errors}"
+    )

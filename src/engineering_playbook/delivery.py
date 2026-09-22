@@ -30,6 +30,7 @@ try:
         verify_root,
         write_yaml_atomic,
     )
+    from .language import portuguese_markers
 except ImportError:
     from engineering_playbook.attestation import (
         SIGNER_WORKFLOW_PATH,
@@ -37,22 +38,23 @@ except ImportError:
         repository_identity,
         verdict_is_expected,
     )
-    from engineering_playbook.core import (
-        ROOT,
-        GhUnavailableError,
-        GitUnavailableError,
-        git_branch,
-        git_capture,
-        git_head,
-        git_ref_exists,
-        git_status,
-        git_tree,
-        load_yaml,
-        utc_now,
-        validate_conventional_title,
-        verify_root,
-        write_yaml_atomic,
-    )
+    from engineering_playbook.language import portuguese_markers
+from engineering_playbook.core import (
+    ROOT,
+    GhUnavailableError,
+    GitUnavailableError,
+    git_branch,
+    git_capture,
+    git_head,
+    git_ref_exists,
+    git_status,
+    git_tree,
+    load_yaml,
+    utc_now,
+    validate_conventional_title,
+    verify_root,
+    write_yaml_atomic,
+)
 
 MAIN_BRANCHES = {"main", "master"}
 BRANCH_TYPES = {
@@ -1617,8 +1619,105 @@ def spec_precedence_refusal(
     )
 
 
+#: A body claiming to be a sub-issue. The claim is prose; `parent_issue_url` is the structure.
+SUB_ISSUE_CLAIM = re.compile(r"\bSub-issue of #(\d+)\b", re.IGNORECASE)
+
+
+#: The detector lives in `engineering_playbook.language`, so this control and the file guard in
+#: `tests/unit/test_the_repository_speaks_one_language.py` cannot answer the same question two
+#: ways. Review measured the copies already diverging: 83 words in one and 58 in the other, with
+#: the `TODO` collision handled in only one of them.
+def portuguese_hits(text: str) -> list[str]:
+    """An issue title or body is prose: `"` there is a quotation mark, not a string delimiter."""
+    return portuguese_markers(text, prose=True)
+
+
+def issue_contract_problems(root: Path, issue_number: int) -> list[str]:
+    """Everything wrong with this issue as a card, or an empty list.
+
+    THE CONTRACT NOTHING ENFORCED. Measured on 2026-09-22 across all 39 issues of this
+    repository: nineteen bodies in Portuguese, two titles in Portuguese, two issues with no label,
+    and two whose body said `Sub-issue of #26` while the API relationship did not exist. Every one
+    passed `publish`, passed `delivery-policy`, and passed the traceability chain -- because none
+    of those looks at language, at labels, or at whether the body's claim of parentage is true.
+
+    They were then fixed by hand, which is the state this repository refuses to call a guarantee.
+
+    WHY THE PARENTAGE CHECK IS NOT REDUNDANT WITH `traceability_refusal`. That one asks whether a
+    parent EXISTS and whether it names a specification. This one asks whether the parent the body
+    ADVERTISES is the parent the API reports. An issue whose body says `Sub-issue of #26` with no
+    relationship satisfies traceability by naming a specification itself, and still tells every
+    human reader something untrue.
+
+    DECLARED SCOPE, per NFR-005: this reads the one issue the pull request closes, not the whole
+    board. Checking all of them on every run would be one API call for the list and one per issue
+    for parentage, and the cost would fall on every push to police issues nobody is delivering.
+    What it does guarantee is that no issue reaches `main` through this pipeline outside the
+    contract -- which is where the nineteen got in.
+    """
+    problems: list[str] = []
+    issue = issue_payload(root, issue_number)
+
+    # ONE marker in a title, two in a line of the body. A title is a sentence fragment and never
+    # reaches two: `publish e merge escrevem bookkeeping depois do push` -- a real title from this
+    # board, in Portuguese -- carries exactly one. Measured on all 39 titles, a one-word threshold
+    # produced a single false positive and it was `TODOs`, which is handled above.
+    title = str(issue.get("title") or "")
+    if portuguese_hits(title):
+        problems.append(
+            f"the title is not in English: {title!r}. The repository is written in English "
+            "(owner's decision, 2026-09-22)"
+        )
+
+    body = str(issue.get("body") or "")
+    portuguese = [line for line in body.splitlines() if len(portuguese_hits(line)) >= 2]
+    if portuguese:
+        problems.append(
+            f"{len(portuguese)} line(s) of the body are not in English, starting with "
+            f"{portuguese[0][:70]!r}"
+        )
+
+    labels = issue.get("labels")
+    if not isinstance(labels, list) or not labels:
+        problems.append(
+            "the issue carries no label. Every other issue on this board has one, and a card "
+            "nobody classified is a card nobody finds"
+        )
+
+    claim = SUB_ISSUE_CLAIM.search(body)
+    parent_url = str(issue.get("parent_issue_url") or "")
+    actual = parent_url.rsplit("/", 1)[-1] if parent_url else None
+    if claim is not None and claim.group(1) != actual:
+        stated = "no parent relationship" if actual is None else f"#{actual}"
+        problems.append(
+            f"the body says `Sub-issue of #{claim.group(1)}` and the API reports {stated}. "
+            "Prose that claims a link the structure does not have is what this repository "
+            "spent #61 and #49 removing from its own specifications"
+        )
+    return problems
+
+
 def command_validate_ci(args: argparse.Namespace) -> int:
     failed = False
+    if getattr(args, "issue_contract_body", None) is not None:
+        # No issue reference is not this control's refusal: the `--pr-body` step below exists for
+        # exactly that and says so with its own message. Two controls refusing the same thing give
+        # the operator two errors for one cause.
+        number = issue_from_pr_body(args.issue_contract_body)
+        if number is not None:
+            try:
+                problems = issue_contract_problems(args.root, number)
+            except IssueLookupError as failure:
+                # NFR-002: a control that cannot measure refuses rather than waving through.
+                print(
+                    f"ERROR: the contract of issue #{number} was not read, and a card that could "
+                    f"not be read is not a card that conforms: {failure}"
+                )
+                failed = True
+            else:
+                for problem in problems:
+                    print(f"ERROR: issue #{number}: {problem}")
+                failed = failed or bool(problems)
     if args.branch and args.branch not in MAIN_BRANCHES and not validate_branch_name(args.branch):
         print(f"ERROR: invalid branch name: {args.branch}")
         failed = True
@@ -1724,6 +1823,12 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     validate_ci.add_argument(
         "--pr-files",
         help="newline-separated paths the pull request changes, from `gh api --paginate`",
+    )
+    validate_ci.add_argument(
+        "--issue-contract-body",
+        metavar="BODY",
+        help="the pull request body; the issue it closes is found with the same rule "
+        "`--pr-body` uses, and that card is checked against the contract",
     )
     validate_ci.add_argument(
         "--pr-file-count",

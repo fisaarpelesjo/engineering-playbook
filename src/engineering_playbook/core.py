@@ -1237,6 +1237,13 @@ def verify_root(root: Path) -> CheckResult:
             "validate-ci --pr-files" in workflow_text,
             "CI must check that a specification claims the changed code (FR-014)",
         )
+        # Same reason, one slice later (#65): the contract check is well tested as a function, and
+        # review measured that deleting the STEP from both copies of the workflow left the whole
+        # suite green. A mechanism nothing invokes is a mechanism that is not running.
+        result.add(
+            "validate-ci --issue-contract-body" in workflow_text,
+            "CI must check that the card conforms to the contract (FR-013, FR-015)",
+        )
 
     ruleset_path = root / ".github/rulesets/main.yml"
     if ruleset_path.exists():
