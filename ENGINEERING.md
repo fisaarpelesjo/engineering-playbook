@@ -50,8 +50,10 @@ este repositorio especifico ja pagou. Comeca vazio -- este repo nao herda o ledg
 
 | # | erro medido | regra que ficou | data |
 |---|---|---|---|
+| 1 | Edicao aplicada por `str.replace` ou por `if <literal> in texto:` que nao casou. Tres vezes na mesma sessao: um alvo de mutacao que nao foi trocado e a mutacao escapou; uma correccao declarada como feita que nunca entrou no ficheiro; e uma sonda de verificacao que imprimiu `ESCAPED` por nao ter inserido nada. As tres vezes o sintoma foi silencio, nao erro. | Toda a edicao automatizada assere a propria edicao antes de medir o efeito: `assert <literal> in texto` antes do `replace`, e nunca `if ... in texto:` a proteger uma substituicao. E o que o `apply_mutation` ja faz com `occurrences == 0 -> inert`. | 2026-09-22 |
+| 2 | Numero de validacao citado de memoria em vez de remedido depois da ultima alteracao. `pyright` foi reportado a 0 erros estando a 3, todos no ficheiro que a fatia tinha acabado de reescrever, e o `prepare` corre `pyright` e devolve o exit code -- a fatia nao era entregavel e o relatorio dizia que era. | Numero que entra em relatorio, spec, tarefa ou corpo de pull request e medido DEPOIS da ultima edicao dessa fatia, e o comando que o mediu e citado ao lado. Um numero so e verdadeiro da arvore de onde foi tirado. | 2026-09-22 |
 
-<!-- | 1 | erro medido, curto e factual | a regra operacional que ficou dele | AAAA-MM-DD | -->
+<!-- | 3 | erro medido, curto e factual | a regra operacional que ficou dele | AAAA-MM-DD | -->
 
 ### A regra da terceira ocorrencia
 

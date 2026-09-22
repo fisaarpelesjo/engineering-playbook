@@ -86,6 +86,13 @@ VERDICT = "tests/unit/test_signed_verdict_leaves_the_tree.py"
 SKIPS = "tests/unit/test_a_skip_is_declared.py"
 MATRIX = "tests/unit/test_coverage_matrix_is_measured.py"
 BASE = "tests/unit/test_one_base_one_meaning.py"
+MIRROR = "tests/unit/test_resource_mirror_parity.py"
+#: The two files whose fidelity the mirror guard exists to protect. Perturbing them is how the
+#: guard is removed for the purposes of this inventory: there is nothing to delete from the test
+#: itself that would make it FAIL -- excluding a path makes it pass -- so what is removed here is
+#: the fidelity of the shipped artifact, and the mechanism is whatever notices.
+SHIPPED_SCHEMA = "src/engineering_playbook/resources/.project/schemas/state.schema.json"
+ROOT_WORKFLOW = ".github/workflows/quality.yml"
 ORIGIN = "tests/unit/test_the_override_leaves_a_trace.py"
 
 # Long source fragments, named so the entries stay readable and the literals stay exact.
@@ -146,6 +153,19 @@ PUBLISH_RESOLVES_BASE = (
     "        )"
 )
 STATUS_RESOLVES_BASE = "        base_ref = resolve_base(args.root, args.remote, args.base)"
+#: A line every schema in this repository carries, so the edit is a drift and not a syntax error.
+SHIPPED_SCHEMA_FIELD = '"$schema"'
+#: A step that appears ONCE, in a job the derived project does receive. `Sync` appears twice, and
+#: `Every mechanism is held...` sits inside the `adversarial` job, which the comparison strips --
+#: mutating either would prove nothing. This plants on the root side the kind of unmirrored edit
+#: #49 measured happening repeatedly by hand in a single session.
+ROOT_WORKFLOW_STEP = "      - name: Typecheck\n"
+#: A COMMENT, and deliberately nothing else. The structural comparison parses both copies, so
+#: YAML discards this line and the two still compare equal -- only the textual comparison
+#: between literal anchors sees it. Without this entry, half of the redundancy the matrix
+#: cell claims would have no mechanism proving it bites.
+ROOT_WORKFLOW_COMMENT = "      # The title is attacker-controlled text on a public repository"
+
 STAGE_TWENTY_PARTIAL = (
     "| 20 | Cadeia de rastreabilidade entre pull request e PRD | parcial, o elo ate ao "
 )
@@ -388,6 +408,45 @@ MUTATIONS: tuple[Mutation, ...] = (
         proves=(f"{SKIPS}::test_a_declaration_that_stopped_skipping_is_refused",),
     ),
     Mutation(
+        # Stage 11 named this test as its evidence while the guard excluded `.project/schemas/`
+        # and `.github/workflows/quality.yml` -- the two families most likely to drift, one of
+        # them edited by hand repeatedly in a single session. Measured on 2026-09-22: the
+        # seven schema pairs were already identical, so the exclusion protected nothing and hid
+        # the next hand edit.
+        mechanism="a schema that drifts from the shipped copy is refused",
+        requirement="FR-018, #49",
+        stage=11,
+        file=SHIPPED_SCHEMA,
+        find=SHIPPED_SCHEMA_FIELD,
+        replace='"$schema_drifted"',
+        proves=(f"{MIRROR}::test_every_mirrored_pair_matches_byte_for_byte",),
+    ),
+    Mutation(
+        # The workflow cannot be pinned byte for byte: the root copy carries an `adversarial` job
+        # a derived project cannot run. So the shipped copy is compared against the root copy with
+        # that job removed, and this entry plants the drift the comparison exists to catch.
+        mechanism="the shipped workflow is the root workflow minus the job it cannot run",
+        requirement="FR-018, #49",
+        stage=11,
+        file=ROOT_WORKFLOW,
+        find=ROOT_WORKFLOW_STEP,
+        replace="      - name: Typecheck\n      - name: Unmirrored\n",
+        proves=(
+            f"{MIRROR}::test_the_shipped_workflow_is_the_root_workflow_minus_the_job_it_cannot_run",
+        ),
+    ),
+    Mutation(
+        mechanism="the shipped workflow matches the root outside the unshipped job, comments too",
+        requirement="FR-018, #49",
+        stage=11,
+        file=ROOT_WORKFLOW,
+        find=ROOT_WORKFLOW_COMMENT,
+        replace="      # The title is attacker controlled text on a public repository",
+        proves=(
+            f"{MIRROR}::test_the_shipped_workflow_matches_byte_for_byte_outside_the_unshipped_job",
+        ),
+    ),
+    Mutation(
         # The matrix guard IS a test, so removing it to prove it would be circular. What gets
         # mutated is the DATA it reads: a stage closed by editing prose, which is the fraud the
         # guard exists to refuse (#39).
@@ -402,7 +461,10 @@ MUTATIONS: tuple[Mutation, ...] = (
 )
 
 #: The coverage-matrix rows this inventory reaches, measured from the entries above rather than
-#: asserted. Six of twenty: the matrix says so, and the vector table is classified accordingly.
+#: asserted. No count is written here on purpose: it is derived on the next line, it changed from
+#: six to seven to eight while this sentence still said six, and
+#: `test_the_matrix_reports_the_inventory_it_actually_has` compares the matrix cell against this
+#: set -- so the number has exactly one home.
 COVERED_STAGES = frozenset(mutation.stage for mutation in MUTATIONS)
 
 
@@ -442,13 +504,23 @@ def apply_mutation(sandbox: Path, mutation: Mutation) -> str | None:
     target = sandbox / mutation.file
     if not target.is_file():
         return f"{mutation.file} is not in the sandbox"
-    text = target.read_text(encoding="utf-8")
+    # `newline=""` on both sides: without it `write_text` translates every `\n` to
+    # `os.linesep`, and on Windows that rewrites the entire file. Review measured the two
+    # stage-11 entries going red with NO drift planted -- the harness's own write was the
+    # mutation. Harmless while every target was a `.py` or `.md` compared by meaning; not
+    # harmless now that entries exist whose target compares bytes.
+    # `Path.read_text` only grew a `newline` parameter in 3.13 and this project targets 3.11,
+    # so the handle is opened explicitly.
+    with target.open("r", encoding="utf-8", newline="") as handle:
+        text = handle.read()
     occurrences = text.count(mutation.find)
     if occurrences == 0:
         return "the text this entry removes is no longer in the file"
     if occurrences > 1:
         return f"the text this entry removes occurs {occurrences} times, so it is not one control"
-    target.write_text(text.replace(mutation.find, mutation.replace, 1), encoding="utf-8")
+    target.write_text(
+        text.replace(mutation.find, mutation.replace, 1), encoding="utf-8", newline=""
+    )
     return None
 
 

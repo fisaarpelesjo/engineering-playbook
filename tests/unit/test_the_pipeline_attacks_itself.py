@@ -39,12 +39,28 @@ ROOT = Path(__file__).resolve().parents[2]
 SPEC = ROOT / "specs/003-no-stage-without-a-mechanism/spec.md"
 
 
-#: The mechanisms this inventory is pinned to. Review measured that a floor -- `len >= 14` -- is
-#: edited on the same line as the thing it guards: two edits emptied the harness to a single entry
-#: and both the suite and the CI job reported total success. A named set cannot be relaxed by
-#: relaxing a number.
+#: The mechanisms this inventory is pinned to -- EVERY one of them, and the equality below is
+#: what makes that true rather than aspirational.
+#:
+#: Review measured that a floor -- `len >= 14` -- is edited on the same line as the thing it
+#: guards: two edits emptied the harness to a single entry and both the suite and the CI job
+#: reported total success. A named set cannot be relaxed by relaxing a number.
+#:
+#: WHY EQUALITY AND NOT `>=`. The subset form catches a mechanism being REMOVED and is blind to one
+#: being ADDED without a name here -- so a new entry could be deleted later, with the matrix count
+#: corrected in the same edit, and the whole suite would stay green. Review raised that in the
+#: first round of #49, two entries were pinned, and the entry added in the third round repeated it.
+#: Counting the eight inherited from earlier slices, the class returned more than three times, and
+#: `ENGINEERING.md` is explicit about what happens then: the unit does not continue until there is
+#: automated prevention that catches the whole class, not only the case that revealed it.
+#:
+#: So the gate is two-way. A mechanism that leaves the inventory fails here, and a mechanism that
+#: joins it without being named here fails too. Adding an entry now costs one line in this set,
+#: which is the point: the decision is written rather than implied.
 PINNED_MECHANISMS = frozenset(
     {
+        "a schema that drifts from the shipped copy is refused",
+        "the shipped workflow is the root workflow minus the job it cannot run",
         "start refuses a HEAD the base already absorbed",
         "start refuses when the base ref cannot be read",
         "a specification claims the changed code",
@@ -59,17 +75,60 @@ PINNED_MECHANISMS = frozenset(
         "an undeclared skip fails the run",
         "a declaration that stopped skipping is refused",
         "a stage cannot be closed by editing prose",
+        "the shipped workflow matches the root outside the unshipped job, comments too",
+        # Inherited from earlier slices, unpinned until now because `>=` could not notice them.
+        "a branch records how it came to exist",
+        "abbreviated long options are refused at git's own minimum",
+        "base means the ref the server will use",
+        "branch arguments are read the way git reads them",
+        "listing options keep a pattern from reading as a branch name",
+        "publish measures against the base the server will use",
+        "status reports against the base the server will use",
+        "the harness refuses branch writes outside the pipeline",
     }
 )
 
 
 def test_the_inventory_still_holds_every_mechanism_it_was_pinned_to() -> None:
-    """A harness over an emptied inventory reports total success and measures nothing."""
-    held = {mutation.mechanism for mutation in MUTATIONS}
+    """A harness over an emptied inventory reports total success and measures nothing.
 
-    assert held >= PINNED_MECHANISMS, (
-        f"these mechanisms left the inventory: {sorted(PINNED_MECHANISMS - held)}. Removing one "
-        "is a decision, and it is made here, not by deleting an entry"
+    Both directions, in ONE assertion, because the two sequential asserts this replaced diagnosed
+    a rename badly: pytest stops at the first, so renaming a mechanism without updating the set
+    read as "these mechanisms left the inventory" when none had left. The operator fixed half,
+    re-ran, and only then saw the other half. Measured by review.
+
+    The duplicate check is the last member of the class the two-way pin closes. A set of names
+    cannot tell two entries apart when they share one, so a twenty-sixth entry pasted from an
+    existing one joins the inventory unpinned and this guard sees twenty-five names either way.
+    """
+    mechanisms = [mutation.mechanism for mutation in MUTATIONS]
+    held = set(mechanisms)
+
+    assert len(held) == len(mechanisms), (
+        "two entries share a `mechanism` name, so the pinned set below cannot tell them apart and "
+        "an entry added by copy-paste would join the inventory without anyone naming it: "
+        f"{sorted({name for name in mechanisms if mechanisms.count(name) > 1})}"
+    )
+
+    missing = sorted(PINNED_MECHANISMS - held)
+    unpinned = sorted(held - PINNED_MECHANISMS)
+    both = missing and unpinned
+    assert not missing and not unpinned, (
+        (
+            f"this looks like a rename: {missing} left the inventory and {unpinned} arrived. "
+            "Both change in the same edit -- the pinned set is the place the decision is written."
+        )
+        if both
+        else (
+            f"these mechanisms left the inventory: {missing}. Removing one is a decision, and a "
+            "decision is made here by name rather than by editing a count."
+        )
+        if missing
+        else (
+            f"these mechanisms are in the inventory and not named here: {unpinned}. Add them: an "
+            "entry nobody pinned can be deleted later with the matrix count corrected in the same "
+            "edit, and nothing would notice."
+        )
     )
 
 
@@ -333,3 +392,52 @@ def test_the_suite_records_what_it_does_not_claim() -> None:
     assert "no bypass vectors" in text, (
         "the record has to say what is not claimed, not merely cite the requirement"
     )
+
+
+def test_applying_an_entry_does_not_rewrite_the_line_endings(tmp_path: Path) -> None:
+    """The harness must change the one thing the entry names, and nothing else.
+
+    Measured by review: `apply_mutation` used to read and write through `Path.read_text` /
+    `write_text`, which translate `\n` to `os.linesep` on write. On Windows that rewrote every
+    line of the file. Harmless while every target was compared by meaning -- and not harmless the
+    moment entries appeared whose target is compared BYTE FOR BYTE, because then the harness's own
+    write turns the target red with no drift planted at all, and `caught` stops being evidence.
+
+    Asserted over every entry rather than the two that exposed it, so the next entry against a
+    byte-compared artifact inherits the guarantee instead of rediscovering the defect.
+
+    WHAT THIS DELIBERATELY DOES NOT ASSERT, recorded here because a deferral that lives only in a
+    review conversation does not survive the slice: it compares the COUNT of CRLF, not "the file
+    changed only where the entry says". The stronger form -- `after == before` with exactly
+    `find` -> `replace` applied -- would also catch a future regression that is not about line
+    endings at all, such as a BOM or a trailing newline. It is not written that way because it
+    turns the contract from "line endings are preserved" into "nothing but the mutation changed",
+    and deciding what counts as a legitimate change is its own decision rather than this fix.
+    Measured today: the count form catches both realistic regressions, `write_text` without
+    `newline` and a full revert to `read_text`/`write_text`.
+    """
+    problems: list[str] = []
+    for entry in MUTATIONS:
+        source = ROOT / entry.file
+        if not source.is_file():
+            continue
+        target = tmp_path / entry.file
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(source.read_bytes())
+
+        before = target.read_bytes()
+        refusal = apply_mutation(tmp_path, entry)
+        if refusal is not None:
+            problems.append(f"{entry.mechanism}: {refusal}")
+            continue
+        after = target.read_bytes()
+
+        crlf_before = before.count(b"\r\n")
+        crlf_after = after.count(b"\r\n")
+        if crlf_before != crlf_after:
+            problems.append(
+                f"{entry.mechanism}: applying it changed the file's line endings "
+                f"({crlf_before} CRLF before, {crlf_after} after)"
+            )
+
+    assert problems == [], "\n".join(problems)
