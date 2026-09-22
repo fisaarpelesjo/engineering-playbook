@@ -1,15 +1,15 @@
 schema_version: 1.0.0
-updated_at: '2026-09-22T09:45:59Z'
+updated_at: '2026-09-22T12:00:31Z'
 active_workstream: WS-001
-current_branch: fix/061-the-gate-earns-its-claim
-issue: 61
+current_branch: fix/049-the-mirror-is-guarded-where-it-drifts
+issue: 49
 current_phase: implement
 status: in_progress
 active_specification: specs/003-no-stage-without-a-mechanism/spec.md
 active_plan: specs/003-no-stage-without-a-mechanism/plan.md
 active_tasks: specs/003-no-stage-without-a-mechanism/tasks.md
-active_task: T220
-last_checkpoint: .project/checkpoints/CP-20260922-e5284832.yml
+active_task: T224
+last_checkpoint: .project/checkpoints/CP-20260922-05000285.yml
 last_verified_commit: 48639d309ec5fffa78082e655afddd999282a29f
 validation:
   passed:
