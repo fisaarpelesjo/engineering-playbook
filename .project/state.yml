@@ -1,15 +1,15 @@
 schema_version: 1.0.0
-updated_at: '2026-09-22T12:00:31Z'
+updated_at: '2026-09-22T16:35:03Z'
 active_workstream: WS-001
-current_branch: fix/049-the-mirror-is-guarded-where-it-drifts
-issue: 49
+current_branch: feat/065-the-repository-speaks-one-language
+issue: 65
 current_phase: implement
 status: in_progress
 active_specification: specs/003-no-stage-without-a-mechanism/spec.md
 active_plan: specs/003-no-stage-without-a-mechanism/plan.md
 active_tasks: specs/003-no-stage-without-a-mechanism/tasks.md
-active_task: T224
-last_checkpoint: .project/checkpoints/CP-20260922-05000285.yml
+active_task: T226
+last_checkpoint: .project/checkpoints/CP-20260922-f240bc38.yml
 last_verified_commit: 48639d309ec5fffa78082e655afddd999282a29f
 validation:
   passed:
@@ -30,7 +30,7 @@ validation:
   not_run: []
 blockers: []
 next_actions:
-- Retomar com uv run python scripts/resume.py antes de novas mudancas.
+- Resume with uv run python scripts/resume.py before making further changes.
 delivery:
   branch: fix/061-the-gate-earns-its-claim
   base: main

@@ -85,6 +85,11 @@ PINNED_MECHANISMS = frozenset(
         "publish measures against the base the server will use",
         "status reports against the base the server will use",
         "the harness refuses branch writes outside the pipeline",
+        "a file that still speaks Portuguese stays named",
+        "the detector reaches Portuguese no word list can hold",
+        "one marker in a short file is still a marker",
+        "an issue may not claim a parent the API does not report",
+        "CI must invoke the card-conforms-to-the-contract gate",
     }
 )
 
@@ -394,6 +399,20 @@ def test_the_suite_records_what_it_does_not_claim() -> None:
     )
 
 
+def _terminators(data: bytes) -> set[str]:
+    """Which line-ending styles this file uses.
+
+    The STYLE, not the count. A mutation replaces text with text of a different shape, so the
+    number of lines legitimately moves -- the first version of this test compared counts and
+    reported three entries as rewriting endings when all they had done was replace a three-line
+    block with a two-line one. What must not change is which terminators appear at all: a
+    CRLF file staying CRLF, an LF file staying LF, and neither growing the other.
+    """
+    crlf = data.count(b"\r\n")
+    bare_lf = data.count(b"\n") - crlf
+    return {name for name, count in (("crlf", crlf), ("lf", bare_lf)) if count}
+
+
 def test_applying_an_entry_does_not_rewrite_the_line_endings(tmp_path: Path) -> None:
     """The harness must change the one thing the entry names, and nothing else.
 
@@ -406,15 +425,17 @@ def test_applying_an_entry_does_not_rewrite_the_line_endings(tmp_path: Path) -> 
     Asserted over every entry rather than the two that exposed it, so the next entry against a
     byte-compared artifact inherits the guarantee instead of rediscovering the defect.
 
-    WHAT THIS DELIBERATELY DOES NOT ASSERT, recorded here because a deferral that lives only in a
-    review conversation does not survive the slice: it compares the COUNT of CRLF, not "the file
-    changed only where the entry says". The stronger form -- `after == before` with exactly
-    `find` -> `replace` applied -- would also catch a future regression that is not about line
-    endings at all, such as a BOM or a trailing newline. It is not written that way because it
-    turns the contract from "line endings are preserved" into "nothing but the mutation changed",
-    and deciding what counts as a legitimate change is its own decision rather than this fix.
-    Measured today: the count form catches both realistic regressions, `write_text` without
-    `newline` and a full revert to `read_text`/`write_text`.
+    WHAT IT COMPARES, after review measured the first version comparing the wrong thing: the
+    line-ending STYLE, not the count. A mutation replaces text with text of another shape, so the
+    number of lines legitimately moves, and the count form reported three innocent entries as
+    rewriting endings when all they had done was swap a three-line block for a two-line one.
+
+    WHAT IT CANNOT SEE, declared per NFR-005 rather than left for the next reader to discover:
+    this test reads the repository's own files, so it only bites where those files carry CRLF --
+    a Windows working tree. On `ubuntu-latest`, where git hands every blob to the checkout as LF
+    and `os.linesep` is `\n`, reverting `apply_mutation` to `write_text` changes nothing and this
+    test stays green. Measured on 2026-09-22, both ways. Holding it on both platforms needs a
+    synthetic CRLF fixture rather than the checkout's own endings, and that is worth doing.
     """
     problems: list[str] = []
     for entry in MUTATIONS:
@@ -432,12 +453,10 @@ def test_applying_an_entry_does_not_rewrite_the_line_endings(tmp_path: Path) -> 
             continue
         after = target.read_bytes()
 
-        crlf_before = before.count(b"\r\n")
-        crlf_after = after.count(b"\r\n")
-        if crlf_before != crlf_after:
+        if _terminators(before) != _terminators(after):
             problems.append(
-                f"{entry.mechanism}: applying it changed the file's line endings "
-                f"({crlf_before} CRLF before, {crlf_after} after)"
+                f"{entry.mechanism}: applying it changed the file's line-ending style "
+                f"({sorted(_terminators(before))} before, {sorted(_terminators(after))} after)"
             )
 
     assert problems == [], "\n".join(problems)

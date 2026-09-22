@@ -23,12 +23,17 @@ import json
 import subprocess
 from pathlib import Path
 from typing import Any
+from unittest.mock import patch
 
 import pytest
 
 from engineering_playbook import delivery
 from engineering_playbook.core import write_yaml_atomic
-from engineering_playbook.delivery import specification_named_by, traceability_refusal
+from engineering_playbook.delivery import (
+    issue_contract_problems,
+    specification_named_by,
+    traceability_refusal,
+)
 
 SPEC_DIR = "specs/003-no-stage-without-a-mechanism"
 
@@ -240,3 +245,138 @@ def test_a_reference_resolves_only_when_the_directory_is_there(tmp_path: Path) -
 
     assert specification_named_by("no reference here", root) == (None, None)
     assert specification_named_by("", root) == (None, None)
+
+
+# ---------------------------------------------------------------------------------------
+# The issue side of the same decision: the contract nothing enforced until #65.
+# ---------------------------------------------------------------------------------------
+
+
+def card(**overrides: object) -> dict[str, object]:
+    """A conforming issue payload, so each test below changes exactly one thing."""
+    payload: dict[str, object] = {
+        "title": "A title in English",
+        "body": "Sub-issue of #26. Everything here is English prose.",
+        "labels": [{"name": "bug"}],
+        "parent_issue_url": "https://api.github.com/repos/o/r/issues/26",
+    }
+    payload.update(overrides)
+    return payload
+
+
+def problems_for(payload: dict[str, object]) -> list[str]:
+    with patch("engineering_playbook.delivery.issue_payload", return_value=payload):
+        return issue_contract_problems(Path("."), 1)
+
+
+def test_a_conforming_card_is_accepted() -> None:
+    """Without this the other tests pass by refusing everything."""
+    assert problems_for(card()) == []
+
+
+def test_a_title_not_in_english_is_refused() -> None:
+    """Measured from this board: the real title carried exactly one Portuguese marker, which is
+    why the threshold for a title is one and not the two a body line needs.
+    """
+    problems = problems_for(card(title="publish e merge escrevem bookkeeping depois do push"))
+
+    assert len(problems) == 1
+    assert "not in English" in problems[0]
+
+
+def test_a_body_not_in_english_is_refused() -> None:
+    problems = problems_for(
+        card(body="Sub-issue de #26. Medido em 2026-09-22: a arvore fica suja e nao ha portao.")
+    )
+
+    assert len(problems) == 1
+    assert "not in English" in problems[0]
+
+
+def test_an_english_title_carrying_a_todo_marker_is_not_refused() -> None:
+    """`TODOs` collides with the Portuguese `todos` and is this repository's own vocabulary: the
+    PRD carries eighty and issue #46 is named after the count. Measured across all 39 titles on
+    this board, it was the only false positive of a one-marker threshold.
+    """
+    assert problems_for(card(title="The PRD is a template with 80 TODOs")) == []
+
+
+def test_a_card_with_no_label_is_refused() -> None:
+    problems = problems_for(card(labels=[]))
+
+    assert len(problems) == 1
+    assert "no label" in problems[0]
+
+
+def test_a_parentage_claim_the_api_does_not_confirm_is_refused() -> None:
+    """The half `traceability_refusal` cannot see. That one asks whether a parent exists and names
+    a specification; this asks whether the parent the body ADVERTISES is the one the API reports.
+
+    Both real: two issues opened by this repository's own agent said `Sub-issue of #26` with no
+    relationship at all, and were linked by hand after the mismatch was measured.
+    """
+    orphan = problems_for(card(parent_issue_url=""))
+    assert len(orphan) == 1
+    assert "no parent relationship" in orphan[0]
+
+    wrong = problems_for(card(parent_issue_url="https://api.github.com/repos/o/r/issues/8"))
+    assert len(wrong) == 1
+    assert "reports #8" in wrong[0]
+
+
+def test_a_body_making_no_claim_is_not_asked_about_parentage() -> None:
+    """A standalone issue is legitimate -- `traceability_refusal` accepts one that names a
+    specification itself. What is refused is CLAIMING a parent that is not there.
+    """
+    assert problems_for(card(body="No claim here.", parent_issue_url="")) == []
+
+
+def test_the_cli_refuses_a_card_outside_the_contract(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The wiring, not the function. Review measured that nothing drove `validate-ci` with this
+    flag at all, so the exit code and the refusal branch were unexercised.
+    """
+    with patch(
+        "engineering_playbook.delivery.issue_payload",
+        return_value=card(labels=[]),
+    ):
+        code = delivery.main(["validate-ci", "--issue-contract-body", "Closes #65"])
+
+    assert code == 1
+    assert "no label" in capsys.readouterr().out
+
+
+def test_the_cli_accepts_a_conforming_card(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    with patch("engineering_playbook.delivery.issue_payload", return_value=card()):
+        code = delivery.main(["validate-ci", "--issue-contract-body", "Closes #65"])
+
+    assert code == 0
+    assert capsys.readouterr().out == ""
+
+
+def test_the_cli_says_nothing_when_the_body_names_no_issue() -> None:
+    """Not this control's refusal: the `--pr-body` step exists for that and says so. Two controls
+    refusing one cause give the operator two errors to chase.
+    """
+    code = delivery.main(["validate-ci", "--issue-contract-body", "No reference at all"])
+
+    assert code == 0
+
+
+def test_the_cli_fails_closed_when_the_card_cannot_be_read(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """NFR-002. Measured on this very slice: the first version of the workflow step carried no
+    `GH_TOKEN`, so `gh` refused, and this is the branch that would have fired.
+    """
+    with patch(
+        "engineering_playbook.delivery.issue_payload",
+        side_effect=delivery.IssueLookupError("gh: no token"),
+    ):
+        code = delivery.main(["validate-ci", "--issue-contract-body", "Closes #65"])
+
+    assert code == 1
+    assert "could not be read" in capsys.readouterr().out

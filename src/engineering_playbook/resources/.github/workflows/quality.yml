@@ -45,6 +45,24 @@ jobs:
         env:
           PR_TITLE: ${{ github.event.pull_request.title }}
         run: uv run python scripts/delivery.py validate-ci --pr-title "$PR_TITLE"
+      - name: The card conforms to the contract
+        if: github.event_name == 'pull_request'
+        # Refuses a card outside the contract: a title or body not in English, no label, or a body
+        # claiming `Sub-issue of #N` that the API does not confirm. Measured on 2026-09-22:
+        # nineteen Portuguese bodies, two Portuguese titles, two unlabelled issues and two false
+        # parentage claims had passed every gate this repository had, and were corrected by hand.
+        #
+        # The body is read LIVE, for the reason the next step documents: `publish` pushes the
+        # branch and only then writes the body, so the payload carries the body as it was before
+        # the card existed. And the issue number is found by `issue_from_pr_body`, not by a second
+        # regex in shell -- the first version of this step reimplemented the closing-keyword rule
+        # more narrowly than the Python one, so `Closes: #65` died with no message under `bash -e`.
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          PR_BODY="$(gh pr view "$PR_NUMBER" --json body --jq .body)"
+          uv run python scripts/delivery.py validate-ci --issue-contract-body "$PR_BODY"
       - name: Closes issue
         if: github.event_name == 'pull_request'
         # The body is read live rather than from the event payload. `publish`
