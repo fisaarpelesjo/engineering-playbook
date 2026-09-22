@@ -1,0 +1,46 @@
+schema_version: 1.0.0
+checkpoint_id: CP-20260921-075d75ad
+created_at: '2026-09-21T22:25:06Z'
+workstream: WS-001
+task: T220
+branch: feat/052-the-override-leaves-a-trace
+head: d9d2cb433fe1e9e4df1c752621cd2ba03c97ea2f
+working_tree:
+  status: clean
+  modified_paths: []
+completed_work:
+- Implemented playbook artifacts or recorded current progress.
+commands:
+- uv sync --locked
+- uv run ruff format --check .
+- uv run ruff check .
+- uv run pyright
+- uv run pytest
+- uv run python scripts/verify.py
+- uv run python scripts/doctor.py
+- uv run python scripts/resume.py
+- uv run python scripts/reconcile.py
+- uv run python scripts/bootstrap.py
+- uv run python scripts/delivery.py status
+- uv run python scripts/checkpoint.py
+- engineering-playbook checkpoint
+validation:
+  passed:
+  - uv sync --locked
+  - uv run ruff format --check .
+  - uv run ruff check .
+  - uv run pyright
+  - uv run pytest
+  - uv run python scripts/verify.py
+  - uv run python scripts/doctor.py
+  - uv run python scripts/resume.py
+  - uv run python scripts/reconcile.py
+  - uv run python scripts/bootstrap.py
+  - uv run python scripts/delivery.py status
+  - uv run python scripts/checkpoint.py
+  - engineering-playbook checkpoint
+  failed: []
+  not_run: []
+blockers: []
+next_action: Retomar com uv run python scripts/resume.py antes de novas mudancas.
+battery_claim_divergent: false
