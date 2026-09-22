@@ -1,5 +1,5 @@
 schema_version: 1.0.0
-updated_at: '2026-09-22T01:57:49Z'
+updated_at: '2026-09-22T01:59:15Z'
 active_workstream: WS-001
 current_branch: fix/061-the-gate-earns-its-claim
 issue: 61
@@ -9,7 +9,7 @@ active_specification: specs/003-no-stage-without-a-mechanism/spec.md
 active_plan: specs/003-no-stage-without-a-mechanism/plan.md
 active_tasks: specs/003-no-stage-without-a-mechanism/tasks.md
 active_task: T220
-last_checkpoint: .project/checkpoints/CP-20260922-8fd9c6c1.yml
+last_checkpoint: .project/checkpoints/CP-20260922-b7b4ef00.yml
 last_verified_commit: 48639d309ec5fffa78082e655afddd999282a29f
 validation:
   passed:
@@ -32,10 +32,10 @@ blockers: []
 next_actions:
 - Retomar com uv run python scripts/resume.py antes de novas mudancas.
 delivery:
-  branch: feat/052-the-override-leaves-a-trace
+  branch: fix/061-the-gate-earns-its-claim
   base: main
   remote: origin
-  pr_number: 60
-  pr_url: https://github.com/fisaarpelesjo/engineering-playbook/pull/60
-  updated_at: '2026-09-21T22:30:53Z'
+  pr_number: 62
+  pr_url: https://github.com/fisaarpelesjo/engineering-playbook/pull/62
+  updated_at: '2026-09-22T02:05:17Z'
 last_verified_tree: 1ddfcf0eba1f0f19f6d8048516caafd2104be036
