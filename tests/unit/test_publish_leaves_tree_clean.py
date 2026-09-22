@@ -38,11 +38,13 @@ import pytest
 
 from engineering_playbook.core import load_yaml, write_yaml_atomic
 from engineering_playbook.delivery import (
+    BOOKKEEPING_PATHS,
     PREPARE_FILE,
     STATE_FILE,
     command_publish,
     commit_bookkeeping,
     delivery_state,
+    is_bookkeeping,
 )
 
 BRANCH = "fix/064-example"
@@ -343,3 +345,56 @@ def test_a_record_nested_somewhere_else_is_not_a_record(tmp_path: Path, gh_is_fa
     assert code == 1
     assert committed is False
     assert git(root, "rev-parse", "HEAD") == before
+
+
+#: The receipt the pre-push hook writes. It names the head it verified, so it cannot live inside a
+#: commit that the same push carries.
+LOCAL_CI_RECEIPT = ".project/last-ci-run.yml"
+
+REPO_ROOT = Path(__file__).resolve().parents[2]
+
+
+def ignored_by_git(path: str) -> bool:
+    return (
+        subprocess.run(
+            ["git", "check-ignore", "-q", "--", path],
+            cwd=REPO_ROOT,
+            capture_output=True,
+            text=True,
+        ).returncode
+        == 0
+    )
+
+
+def test_every_record_the_pipeline_stages_can_actually_be_committed() -> None:
+    """`git add -- <ignored path>` exits non-zero, so an ignored entry here breaks every publish.
+
+    This is the pairing that broke: `.project/last-ci-run.yml` was in `BOOKKEEPING_PATHS` AND is
+    now git-ignored. Either half alone is fine; together they would make `commit_bookkeeping`
+    return the exit code of a failed `git add` on every run.
+    """
+    ignored = [path for path in BOOKKEEPING_PATHS if ignored_by_git(path)]
+    assert not ignored, (
+        f"these are staged by `commit_bookkeeping` and ignored by git: {ignored}. "
+        "`git add --` fails on an ignored pathspec, so publish would return non-zero every time."
+    )
+
+
+def test_the_local_ci_receipt_is_not_something_publish_tries_to_commit() -> None:
+    """The other direction, and the reason it is a separate assertion.
+
+    Measured on the first real publish through this code path: everything else was committed and
+    `M .project/last-ci-run.yml` was still there afterwards, because the second push runs the
+    pre-push hook, which rewrites the receipt naming the commit that push is carrying. No ordering
+    fixes that -- a receipt about HEAD cannot be inside HEAD -- so it is ignored instead, and this
+    keeps it from being quietly added back to the records publish commits.
+    """
+    assert not is_bookkeeping(LOCAL_CI_RECEIPT), (
+        "the local CI receipt is back among the records publish commits. It is rewritten by the "
+        "pre-push hook during publish's own second push, so committing it cannot leave a clean "
+        "tree no matter where in the command it is done."
+    )
+    assert ignored_by_git(LOCAL_CI_RECEIPT), (
+        "the local CI receipt is tracked again. It names the head it verified, so every push "
+        "makes it dirty and `start` refuses the next slice -- issue #64, from the other side."
+    )

@@ -352,12 +352,19 @@ def ownership_allows(root: Path, files: list[str]) -> bool:
     return all(any(path == item or path.startswith(f"{item}/") for item in owned) for path in files)
 
 
-#: Everything the pipeline writes ABOUT itself rather than about the work: the state file, the
-#: last CI run it observed, and the checkpoints it appends. Nothing here is ever authored by the
+#: Everything the pipeline writes ABOUT itself rather than about the work, and that CAN be
+#: committed: the state file and the checkpoints it appends. Nothing here is ever authored by the
 #: operator, which is what makes it safe to stage on their behalf.
+#:
+#: `.project/last-ci-run.yml` was in this tuple and is deliberately not any more. It is the local
+#: CI receipt, written by the pre-push hook, and its contents NAME the head it just verified. So
+#: the second push in `command_publish` regenerates it against the bookkeeping commit that the
+#: push is carrying, and the tree is dirty again the moment the command returns -- measured on the
+#: first real publish through this code path, which left `M .project/last-ci-run.yml` behind after
+#: committing everything else. No ordering fixes it: a receipt about HEAD cannot be inside HEAD.
+#: It is git-ignored instead, like `.project/delivery/`, which is what it always was in substance.
 BOOKKEEPING_PATHS = (
     ".project/state.yml",
-    ".project/last-ci-run.yml",
     ".project/checkpoints",
 )
 
@@ -366,11 +373,10 @@ def is_bookkeeping(path: str) -> bool:
     """True when `path` IS one of the pipeline's own records, by path boundary and not by prefix.
 
     `str.startswith` on the bare tuple was the first version of this, and review broke it with four
-    real paths. `.project/state.yml.bak`, `.project/last-ci-run.yml.orig`,
-    `.project/checkpointsX.txt` and `.project/checkpoints-archive/secret.yml` each begin with a
-    listed string without being one of these files, and each was committed -- and pushed -- inside
-    a bookkeeping commit, while the docstring above `commit_bookkeeping` claimed that anything
-    unrelated would be refused.
+    real paths. `.project/state.yml.bak`, `.project/checkpointsX.txt` and
+    `.project/checkpoints-archive/secret.yml` each begin with a listed string without being one of
+    these files, and each was committed -- and pushed -- inside a bookkeeping commit, while the
+    docstring above `commit_bookkeeping` claimed that anything unrelated would be refused.
 
     The same comparison is already written correctly 500 lines above, in `ownership_allows`: a path
     matches an entry when it IS that entry or lives UNDER it. There is no reason for this module to
@@ -406,12 +412,10 @@ def prepare_invalidated_by_own_checkpoint(
     paths = [line for line in changed.splitlines() if line.strip()]
     if not paths:
         return False
-    # Derived from `BOOKKEEPING_PATHS` rather than spelled again. The two disagreed: this one
-    # accepted only `.project/checkpoints/` and `STATE_FILE`, so once `publish` began folding
-    # `.project/last-ci-run.yml` into the same commit -- the file the issue's own measurement lists
-    # as dirty -- `prepare_is_fresh` fell back to the generic "HEAD changed" instead of the FR-002
-    # message that names the cause and the way out. `core.py` already carries a capitalised note
-    # about one predicate and three readers, from issue #10; this is that shape inside one file.
+    # Derived from `BOOKKEEPING_PATHS` rather than spelled again. The two were written separately
+    # and disagreed, which is the shape `core.py` already carries a capitalised note about -- one
+    # predicate, three readers, issue #10. They agree here by construction, so a path entering or
+    # leaving the pipeline's own records cannot change one reader without the other.
     return all(is_bookkeeping(path) for path in paths)
 
 

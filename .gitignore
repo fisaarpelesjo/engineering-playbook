@@ -12,3 +12,4 @@ __pycache__/
 .env
 .env.*
 !.env.example
+.project/last-ci-run.yml

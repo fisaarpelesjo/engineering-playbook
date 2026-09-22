@@ -183,8 +183,8 @@ def speaking_portuguese() -> set[str]:
     return speaking
 
 
-#: Every tracked file that still carries Portuguese, measured on 2026-09-22: 114 files,
-#: 1599 lines, out of 255 tracked text files read.
+#: Every tracked file that still carries Portuguese, measured on 2026-09-22: 113 files,
+#: 1599 lines, out of 254 tracked text files read.
 #:
 #: This list is the work item of issue #65 made countable. It shrinks as translation lands, and
 #: the test below refuses both directions -- a file joining it, and a file that stopped needing
@@ -198,7 +198,6 @@ STILL_PORTUGUESE = frozenset(
         ".claude/agents/reviewer.md",
         ".claude/agents/security-reviewer.md",
         ".claude/agents/test-engineer.md",
-        ".project/last-ci-run.yml",
         "AGENTS.md",
         "CLAUDE.md",
         "CONTRIBUTING.md",
