@@ -239,6 +239,16 @@ def test_publish_with_an_open_declared_issue_creates_the_pull_request(
             )
         if cmd_args[:3] == ["gh", "pr", "create"]:
             return subprocess.CompletedProcess(cmd_args, 0, "https://example.invalid/pull/1", "")
+        # Issue #64: `publish` folds its own records into a commit instead of leaving them
+        # uncommitted. `test_publish_leaves_tree_clean.py` owns that behaviour against a real
+        # repository; here the commands are only recognised, so this test keeps measuring the
+        # issue gate rather than failing on a step it does not own.
+        if cmd_args[:4] == ["git", "diff", "--cached", "--name-only"]:
+            return subprocess.CompletedProcess(cmd_args, 0, ".project/state.yml\n", "")
+        if cmd_args[:2] == ["git", "add"]:
+            return subprocess.CompletedProcess(cmd_args, 0, "", "")
+        if cmd_args[:2] == ["git", "commit"]:
+            return subprocess.CompletedProcess(cmd_args, 0, "[branch abc1234] chore", "")
         raise AssertionError(f"unexpected command: {cmd_args}")
 
     monkeypatch.setattr("engineering_playbook.delivery.run", fake)
@@ -249,6 +259,14 @@ def test_publish_with_an_open_declared_issue_creates_the_pull_request(
     assert any(c[:3] == ["gh", "pr", "create"] for c in calls)
     state = load_yaml(root / STATE_FILE)
     assert state["delivery"]["pr_number"] == 1
+    assert any(c[:2] == ["git", "commit"] for c in calls), (
+        "publish did not record its own writes -- issue #64"
+    )
+    pushes = [c for c in calls if c[:2] == ["git", "push"]]
+    assert len(pushes) == 2, (
+        f"expected the branch push and the bookkeeping push, got: {pushes}. The second push is "
+        "the declared cost of leaving no dirty tree behind."
+    )
 
 
 def test_publish_refuses_when_the_declared_issue_does_not_exist(

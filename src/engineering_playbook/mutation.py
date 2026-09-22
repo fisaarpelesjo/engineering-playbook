@@ -78,7 +78,31 @@ MATRIX = "tests/unit/test_coverage_matrix_is_measured.py"
 BASE = "tests/unit/test_one_base_one_meaning.py"
 MIRROR = "tests/unit/test_resource_mirror_parity.py"
 GUARD = "tests/unit/test_the_repository_speaks_one_language.py"
+
+#: The tree `publish` hands back, measured after the command.
+PUBLISH_CLEAN_GUARD = "tests/unit/test_publish_leaves_tree_clean.py"
 CHAIN = "tests/unit/test_the_chain_is_verified.py"
+#: The line that puts the pipeline's own records into the index. Without it `publish` commits
+#: nothing and hands back the dirty tree that `start` then refuses -- issue #64.
+BOOKKEEPING_STAGED = '    staged = run(root, ["git", "add", "--", *present])'
+
+#: The refusal that keeps work the operator staged out of a commit whose message they never wrote.
+BOOKKEEPING_REFUSES_UNRELATED = "    if unrelated:"
+
+#: The pathspec itself. Review changed this one token to `git add -A` and the whole five-test suite
+#: stayed green, because every test started from a clean tree and the one decoy sat in the index,
+#: where the refusal already looks. `publish` would have swept unfinished work into a commit the
+#: operator never wrote a message for and pushed it.
+BOOKKEEPING_PATHSPEC = '    staged = run(root, ["git", "add", "--", *present])'
+
+#: Path boundary rather than string prefix. `.project/state.yml.bak` and
+#: `.project/checkpoints-archive/` begin with a listed string without being the file or the
+#: directory it names; under the first version of this line all four of review's planted paths were
+#: committed and pushed inside a bookkeeping commit.
+BOOKKEEPING_BOUNDARY = (
+    '    return any(path == item or path.startswith(f"{item}/") for item in BOOKKEEPING_PATHS)'
+)
+
 #: The line that decides a piece of text is Portuguese, in the shared detector both guards call.
 #: Raising the threshold is the cheapest way to make them measure nothing while still passing:
 #: at three markers a line, the whole inventory reads as already translated.
@@ -477,6 +501,51 @@ MUTATIONS: tuple[Mutation, ...] = (
         find=LANGUAGE_THRESHOLD,
         replace="    return len(portuguese_markers(text, prose=prose)) >= threshold + 1",
         proves=(f"{GUARD}::test_a_translated_file_leaves_the_inventory",),
+    ),
+    Mutation(
+        # Stage 9 of the matrix, and the half of it that was declared `parcial`. The tree AFTER
+        # the command is what these measure: every write `publish` makes is wanted, the defect was
+        # that it stayed uncommitted.
+        mechanism="publish leaves no tree behind it",
+        requirement="FR-001, #64",
+        stage=9,
+        file=DELIVERY,
+        find=BOOKKEEPING_STAGED,
+        replace='    staged = run(root, ["git", "status", "--porcelain"])',
+        proves=(f"{PUBLISH_CLEAN_GUARD}::test_after_publish_the_tree_is_clean",),
+    ),
+    Mutation(
+        mechanism="a bookkeeping commit carries only bookkeeping",
+        requirement="FR-001, #64",
+        stage=9,
+        file=DELIVERY,
+        find=BOOKKEEPING_REFUSES_UNRELATED,
+        replace="    if False:",
+        proves=(
+            f"{PUBLISH_CLEAN_GUARD}"
+            "::test_work_the_operator_staged_is_never_swept_into_a_bookkeeping_commit",
+        ),
+    ),
+    Mutation(
+        mechanism="publish stages its own records and nothing else",
+        requirement="FR-001, #64",
+        stage=9,
+        file=DELIVERY,
+        find=BOOKKEEPING_PATHSPEC,
+        replace='    staged = run(root, ["git", "add", "-A"])',
+        proves=(
+            f"{PUBLISH_CLEAN_GUARD}"
+            "::test_work_in_progress_outside_the_index_is_left_exactly_where_it_was",
+        ),
+    ),
+    Mutation(
+        mechanism="a record is matched at a path boundary, not by prefix",
+        requirement="FR-001, #64",
+        stage=9,
+        file=DELIVERY,
+        find=BOOKKEEPING_BOUNDARY,
+        replace="    return any(path.startswith(item) for item in BOOKKEEPING_PATHS)",
+        proves=(f"{PUBLISH_CLEAN_GUARD}::test_a_path_that_merely_begins_like_a_record_is_not_one",),
     ),
     Mutation(
         # The inventory cannot hold either of the next two. It is regenerated FROM the detector, so
