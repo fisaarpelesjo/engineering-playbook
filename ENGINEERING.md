@@ -36,6 +36,12 @@ Agentes devem ler o PRD antes de executar `specify`, `plan`, `tasks` ou `impleme
 
 Uma entrega so e concluida quando requisitos e criterios foram satisfeitos, testes e verificacoes aplicaveis passaram, documentacao foi atualizada, limitacoes foram registradas, revisao e convergencia foram feitas, rastreabilidade com PRD foi preservada quando aplicavel, e `.project/state.yml` mais o checkpoint final estao validos.
 
+## Test policy
+
+A skipped test is not a passing test. Zero tolerance here means zero *undeclared* skips, not `skipped 0`: every `skipped` or `xfailed` case in a full run is one somebody accepted in a versioned inventory, with its reason, and not one the author waved through with `pytest.skip("...")`. A skip for an unavailable platform or an expired credential is honest behaviour of the test; it is green only once it is declared. A declaration expected to skip on this platform that stopped skipping is refused, and so is a skip whose reason no longer starts with the declared one, so the inventory cannot outlive what it excuses. `--deselect`, `-k`, `-m` and explicit paths narrow a run; a narrowed run is not the full run and is never the evidence for Definition of Done.
+
+In the playbook's own repository this is a mechanism, not a sentence: the test suite reads the execution report (not the exit code, which is zero for a run full of skips), compares it with the declared inventory, and fails the session on any difference. That mechanism is not installed into derived projects; a derived project that ships its own suite should apply the same rule to it.
+
 ## Git
 
 Use trunk based development com branches curtas. Nao faca commit, push, merge, tag ou release sem autorizacao explicita. Commits e titulos de PR seguem Conventional Commits em ingles.

@@ -1,15 +1,15 @@
 schema_version: 1.0.0
-updated_at: '2026-09-23T02:57:23Z'
+updated_at: '2026-09-23T03:34:06Z'
 active_workstream: WS-001
-current_branch: fix/076-the-gate-tools-match-the-lock
-issue: 76
+current_branch: docs/078-the-test-policy-tolerates-no-skip
+issue: 78
 current_phase: implement
 status: in_progress
 active_specification: specs/003-no-stage-without-a-mechanism/spec.md
 active_plan: specs/003-no-stage-without-a-mechanism/plan.md
 active_tasks: specs/003-no-stage-without-a-mechanism/tasks.md
 active_task: T229
-last_checkpoint: .project/checkpoints/CP-20260923-0f9ca4a4.yml
+last_checkpoint: .project/checkpoints/CP-20260923-bace547b.yml
 last_verified_commit: 48639d309ec5fffa78082e655afddd999282a29f
 validation:
   passed:
@@ -32,10 +32,6 @@ blockers: []
 next_actions:
 - Resume with uv run python scripts/resume.py before making further changes.
 last_verified_tree: 1ddfcf0eba1f0f19f6d8048516caafd2104be036
-delivery:
-  branch: fix/076-the-gate-tools-match-the-lock
-  base: main
-  remote: origin
-  pr_number: 82
-  pr_url: https://github.com/fisaarpelesjo/engineering-playbook/pull/82
-  updated_at: '2026-09-23T03:06:16Z'
+no_spec_reason: 'Issue #78 writes down in ENGINEERING.md, and its shipped copy, a
+  test policy that tests/conftest.py already enforces (T210); no behaviour and no
+  specification change.'
