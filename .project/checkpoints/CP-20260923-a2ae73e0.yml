@@ -1,0 +1,59 @@
+schema_version: 1.0.0
+checkpoint_id: CP-20260923-a2ae73e0
+created_at: '2026-09-23T02:44:14Z'
+workstream: WS-001
+task: T229
+branch: fix/076-the-gate-tools-match-the-lock
+head: d6cb675287363c9db76e81a0df9fb103c3d3046e
+working_tree:
+  status: dirty
+  modified_paths:
+  - M  .project/state.yml
+  - M  docs/requirements/project-requirements.md
+  - M  pyproject.toml
+  - M  specs/003-no-stage-without-a-mechanism/spec.md
+  - M  specs/003-no-stage-without-a-mechanism/tasks.md
+  - M  src/engineering_playbook/mutation.py
+  - M  src/engineering_playbook/resources/pyproject.toml
+  - M  src/engineering_playbook/resources/uv.lock
+  - A  tests/unit/test_the_gate_tools_match_the_lock.py
+  - M  tests/unit/test_the_pipeline_attacks_itself.py
+  - M  tests/unit/test_the_repository_speaks_one_language.py
+  - M  uv.lock
+  - ?? .project/checkpoints/CP-20260923-91f482e6.yml
+completed_work:
+- Implemented playbook artifacts or recorded current progress.
+commands:
+- uv sync --locked
+- uv run ruff format --check .
+- uv run ruff check .
+- uv run pyright
+- uv run pytest
+- uv run python scripts/verify.py
+- uv run python scripts/doctor.py
+- uv run python scripts/resume.py
+- uv run python scripts/reconcile.py
+- uv run python scripts/bootstrap.py
+- uv run python scripts/delivery.py status
+- uv run python scripts/checkpoint.py
+- engineering-playbook checkpoint
+validation:
+  passed:
+  - uv sync --locked
+  - uv run ruff format --check .
+  - uv run ruff check .
+  - uv run pyright
+  - uv run pytest
+  - uv run python scripts/verify.py
+  - uv run python scripts/doctor.py
+  - uv run python scripts/resume.py
+  - uv run python scripts/reconcile.py
+  - uv run python scripts/bootstrap.py
+  - uv run python scripts/delivery.py status
+  - uv run python scripts/checkpoint.py
+  - engineering-playbook checkpoint
+  failed: []
+  not_run: []
+blockers: []
+next_action: Resume with uv run python scripts/resume.py before making further changes.
+battery_claim_divergent: false
