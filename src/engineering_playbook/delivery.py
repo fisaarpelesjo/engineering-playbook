@@ -5,7 +5,7 @@ import json
 import re
 import subprocess
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 try:
     from .attestation import (
@@ -95,10 +95,20 @@ def build_branch_name(change_type: str, item_id: str, slug: str) -> str:
     if change_type not in BRANCH_TYPES:
         raise ValueError(f"invalid branch type: {change_type}")
     if not re.match(r"^[0-9]{3,6}$", item_id):
-        raise ValueError(f"invalid spec/issue number: {item_id}")
+        raise ValueError(f"invalid issue number: {item_id}")
     if not re.match(r"^[a-z0-9]+(?:-[a-z0-9]+)*$", slug):
         raise ValueError(f"invalid slug: {slug}")
     return f"{change_type}/{item_id}-{slug}"
+
+
+def issue_from_branch(branch: str) -> int | None:
+    """The issue number a pipeline branch was built from, or None for a name it did not build.
+
+    `build_branch_name` puts the number `start` was given right after the type, so the branch
+    name carries the issue and can be compared with the state without asking the network.
+    """
+    match = re.match(r"^[a-z]+/([0-9]{3,6})-", branch)
+    return int(match.group(1)) if match else None
 
 
 def validate_pr_title(title: str) -> bool:
@@ -696,6 +706,11 @@ def command_start(args: argparse.Namespace) -> int:
     if not validate_branch_name(branch):
         print(f"ERROR: invalid branch name: {branch}")
         return 1
+    if int(args.number) < 1:
+        # Refused before the switch: `issue: 0` breaks the state schema's `minimum: 1`, and that
+        # would otherwise surface only later, in `verify`, on a branch that already exists.
+        print(f"ERROR: --number {args.number} is not an issue number; issues start at 1.")
+        return 1
     if args.allow_unmerged_head and args.from_base:
         # The two flags together ask for nothing: `--from-base` starts the branch at the base, so
         # there is no unmerged HEAD to carry and the check the override suppresses had nothing to
@@ -755,8 +770,44 @@ def command_start(args: argparse.Namespace) -> int:
         override,
         override_exercised,
     )
+    record_slice_in_state(args.root, branch, int(args.number))
     print(branch)
     return 0
+
+
+def record_slice_in_state(root: Path, branch: str, issue: int) -> None:
+    """Point the state at the slice `start` just opened, not the one before it.
+
+    ISSUE #73. `start` was given the issue number, built the branch name from it and wrote it
+    nowhere, so `.project/state.yml` kept the PREVIOUS slice's `issue` until somebody edited it by
+    hand, and `prepare` wrote `Closes #<previous>` into the pull request body. It failed closed
+    only while that previous issue happened to be closed already.
+
+    `delivery` is dropped rather than kept: it names the previous slice's branch and pull request,
+    and `status` printed that pull request as if it belonged to this branch. `publish` writes it
+    again once this slice has one.
+
+    A repository with no state file, or one that does not hold a mapping, is left alone: `start`
+    does not bootstrap one, and `prepare` refuses a branch whose number the state does not declare.
+
+    COST, DECLARED. This write leaves `.project/state.yml` modified right after `start`, so a
+    second `start` -- after a slug typo, say -- is refused as a dirty tree until it is given
+    `--allow-dirty`, and `git switch main` carries the new `issue` along. The ordinary path folds
+    the file into the slice's own commit through `commit`. The dirty-tree gate gets no exception
+    for it: an exception there for paths it has to trust is the trade #64 already refused.
+    """
+    state_path = root / STATE_FILE
+    if not state_path.is_file():
+        return
+    loaded: Any = load_yaml(state_path)
+    if not isinstance(loaded, dict):
+        return
+    state = cast(dict[str, Any], loaded)
+    state["issue"] = issue
+    state["current_branch"] = branch
+    state.pop("delivery", None)
+    state["updated_at"] = utc_now()
+    write_yaml_atomic(state_path, state)
 
 
 def command_prepare(args: argparse.Namespace) -> int:
@@ -779,6 +830,28 @@ def command_prepare(args: argparse.Namespace) -> int:
     title = args.title or f"{branch.split('/', 1)[0]}: {branch.split('-', 1)[-1].replace('-', ' ')}"
     if not validate_pr_title(title):
         print(f"ERROR: invalid Conventional Commit title: {title}")
+        return 1
+    # ISSUE #73. Checked before the gates, which take minutes: the body this call writes says
+    # `Closes #<issue>`, and an issue the branch was not built from closes the wrong one on merge.
+    # `start` now writes the number, so this catches a state edited by hand after it.
+    # A branch the pipeline did not build carries no number and is not checked: there is nothing
+    # to compare against, and `pr_body` then takes the state's `issue` on trust, as it always did.
+    branch_issue = issue_from_branch(branch)
+    state_path = args.root / STATE_FILE
+    loaded: Any = load_yaml(state_path) if state_path.is_file() else None
+    declared_issue: object = (
+        cast(dict[str, Any], loaded).get("issue") if isinstance(loaded, dict) else None
+    )
+    if branch_issue is not None and (
+        type(declared_issue) is not int or declared_issue != branch_issue
+    ):
+        kind = "" if declared_issue is None or type(declared_issue) is int else ", not an integer"
+        print(
+            f"ERROR: {STATE_FILE} declares issue {declared_issue!r}{kind}, but branch {branch} "
+            f"was started for #{branch_issue}. The pull request body would not close this "
+            f"slice's issue. Set `issue: {branch_issue}` in {STATE_FILE}, or start a branch for "
+            "the other one."
+        )
         return 1
     commands = [
         ["uv", "run", "python", "scripts/resume.py"],
@@ -809,8 +882,7 @@ def command_prepare(args: argparse.Namespace) -> int:
             f"ERROR: git nao respondeu, portanto os arquivos alterados nao foram medidos: {failure}"
         )
         return 1
-    declared_issue = load_yaml(args.root / ".project/state.yml").get("issue")
-    body = pr_body(title, files, declared_issue if isinstance(declared_issue, int) else None)
+    body = pr_body(title, files, declared_issue if type(declared_issue) is int else None)
     write_yaml_atomic(args.root / PREPARE_FILE, delivery_state(args.root, title, body, files))
     (args.root / PR_BODY_FILE).write_text(body, encoding="utf-8", newline="\n")
     run(args.root, ["uv", "run", "python", "scripts/checkpoint.py"])
@@ -1913,7 +1985,11 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 
     start = subparsers.add_parser("start")
     start.add_argument("--type", required=True)
-    start.add_argument("--number", required=True)
+    start.add_argument(
+        "--number",
+        required=True,
+        help="the GitHub issue this slice closes; recorded as `issue` in the state (issue #73)",
+    )
     start.add_argument("--slug", required=True)
     start.add_argument("--allow-dirty", action="store_true")
     start.add_argument("--remote", default="origin")

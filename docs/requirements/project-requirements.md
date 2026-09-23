@@ -246,7 +246,7 @@ The repository contains, today:
 - A canonical process in `ENGINEERING.md` and an entry point in `AGENTS.md`, with thin adapters (`CLAUDE.md`, `.claude/agents/`, `docs/agents/`) that reference rather than restate.
 - A delivery pipeline, `scripts/delivery.py`, with the stages `start`, `prepare`, `commit`, `publish`, `merge --auto` and `status`, plus a `PreToolUse` hook that refuses raw `git` invocations which would bypass it.
 - A verification entry point, `scripts/verify.py`, and a doctor, `scripts/doctor.py`.
-- An adversarial harness, `scripts/mutation.py`, holding 34 mechanisms, each with the test that fails without it.
+- An adversarial harness, `scripts/mutation.py`, holding 37 mechanisms, each with the test that fails without it.
 - Four specifications under `specs/`, of which `003-no-stage-without-a-mechanism` carries the 20-stage coverage matrix.
 - A bootstrap path that installs a mirrored copy of the process into a derived project, with a parity test that refuses drift between the root and `src/engineering_playbook/resources/`.
 
@@ -459,9 +459,9 @@ Observable result: `caught`, or a verdict naming why not.
 
 <!-- Liste o caminho nominal com passos observaveis. -->
 
-1. `start --type <t> --number <nnn> --slug <s>` creates the branch from the resolved base and refuses a dirty tree unless `--allow-dirty` is given.
+1. `start --type <t> --number <nnn> --slug <s>` creates the branch from the resolved base, refuses a dirty tree unless `--allow-dirty` is given, and records `issue: <nnn>` and the branch in `.project/state.yml` (issue #73), which leaves that file modified until `commit` folds it in.
 2. Work happens. Specs, tasks and code change together.
-3. `prepare` runs format, lint, types, tests and `verify.py`, performs a read-only review and writes a checkpoint. It commits nothing and touches nothing remote.
+3. `prepare` refuses a state whose `issue` is not the number the branch was started for, then runs format, lint, types, tests and `verify.py`, performs a read-only review and writes a checkpoint. It commits nothing and touches nothing remote.
 4. `commit` refuses staged secrets and paths outside the active ownership, creates the content commit, records the verified commit and tree, and folds that record into a second commit so the tree is clean.
 5. `publish` verifies the declared issue is open, pushes, opens or updates the pull request, records the delivery, commits that record and pushes it.
 6. CI runs `quality`, `delivery-policy` and `adversarial`, then `attest` mints the signed verdict.

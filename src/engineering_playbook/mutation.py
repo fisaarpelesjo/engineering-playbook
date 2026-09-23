@@ -71,6 +71,7 @@ SPEC = "specs/003-no-stage-without-a-mechanism/spec.md"
 HOOK = ".claude/hooks/enforce_delivery_pipeline.py"
 
 START = "tests/unit/test_start_measures_its_base.py"
+ISSUE = "tests/unit/test_start_records_the_issue.py"
 CLAIMS = "tests/unit/test_code_names_its_spec.py"
 VERDICT = "tests/unit/test_signed_verdict_leaves_the_tree.py"
 SKIPS = "tests/unit/test_a_skip_is_declared.py"
@@ -142,6 +143,11 @@ ORIGIN = "tests/unit/test_the_override_leaves_a_trace.py"
 # Long source fragments, named so the entries stay readable and the literals stay exact.
 BASE_CONTAINS_HEAD = '    if unmerged == "0":\n        return None'
 BASE_REF_MISSING = "    if not git_ref_exists(root, ref):"
+#: Issue #73. `start` was given the issue and wrote it nowhere, so `prepare` closed the previous
+#: slice's issue. The call, the stale pull request record it drops, and the refusal in `prepare`.
+START_RECORDS_ISSUE = "    record_slice_in_state(args.root, branch, int(args.number))"
+START_DROPS_DELIVERY = '    state.pop("delivery", None)'
+PREPARE_ISSUE_REFUSAL = "    if branch_issue is not None and ("
 SPEC_DIR_TOUCHED = (
     "    if spec_dir and any(path.startswith(spec_dir) for path in changed_paths):\n"
     "        return None"
@@ -256,6 +262,33 @@ MUTATIONS: tuple[Mutation, ...] = (
         find=BASE_REF_MISSING,
         replace="    if False:",
         proves=(f"{START}::test_a_base_that_cannot_be_read_refuses_rather_than_assuming",),
+    ),
+    Mutation(
+        mechanism="start records the issue it was given",
+        requirement="FR-001, T228",
+        stage=9,
+        file=DELIVERY,
+        find=START_RECORDS_ISSUE,
+        replace="    pass",
+        proves=(f"{ISSUE}::test_start_points_the_state_at_the_slice_it_opened",),
+    ),
+    Mutation(
+        mechanism="start drops the previous slice's pull request record",
+        requirement="FR-001, T228",
+        stage=9,
+        file=DELIVERY,
+        find=START_DROPS_DELIVERY,
+        replace="    pass",
+        proves=(f"{ISSUE}::test_start_points_the_state_at_the_slice_it_opened",),
+    ),
+    Mutation(
+        mechanism="prepare refuses a state that names another issue",
+        requirement="FR-001, T228",
+        stage=9,
+        file=DELIVERY,
+        find=PREPARE_ISSUE_REFUSAL,
+        replace="    if False and (",
+        proves=(f"{ISSUE}::test_prepare_refuses_a_state_that_names_another_issue",),
     ),
     Mutation(
         mechanism="a specification claims the changed code",
