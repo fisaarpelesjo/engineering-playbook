@@ -1,15 +1,15 @@
 schema_version: 1.0.0
-updated_at: '2026-09-23T02:06:28Z'
+updated_at: '2026-09-23T02:44:14Z'
 active_workstream: WS-001
-current_branch: fix/073-start-records-the-issue
-issue: 73
+current_branch: fix/076-the-gate-tools-match-the-lock
+issue: 76
 current_phase: implement
 status: in_progress
 active_specification: specs/003-no-stage-without-a-mechanism/spec.md
 active_plan: specs/003-no-stage-without-a-mechanism/plan.md
 active_tasks: specs/003-no-stage-without-a-mechanism/tasks.md
-active_task: T228
-last_checkpoint: .project/checkpoints/CP-20260923-223ed09d.yml
+active_task: T229
+last_checkpoint: .project/checkpoints/CP-20260923-a2ae73e0.yml
 last_verified_commit: 48639d309ec5fffa78082e655afddd999282a29f
 validation:
   passed:
@@ -32,10 +32,3 @@ blockers: []
 next_actions:
 - Resume with uv run python scripts/resume.py before making further changes.
 last_verified_tree: 1ddfcf0eba1f0f19f6d8048516caafd2104be036
-delivery:
-  branch: fix/073-start-records-the-issue
-  base: main
-  remote: origin
-  pr_number: 81
-  pr_url: https://github.com/fisaarpelesjo/engineering-playbook/pull/81
-  updated_at: '2026-09-23T02:14:55Z'

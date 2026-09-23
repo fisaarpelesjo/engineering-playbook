@@ -79,6 +79,7 @@ MATRIX = "tests/unit/test_coverage_matrix_is_measured.py"
 BASE = "tests/unit/test_one_base_one_meaning.py"
 MIRROR = "tests/unit/test_resource_mirror_parity.py"
 GUARD = "tests/unit/test_the_repository_speaks_one_language.py"
+PINS = "tests/unit/test_the_gate_tools_match_the_lock.py"
 
 #: The tree `publish` hands back, measured after the command.
 PUBLISH_CLEAN_GUARD = "tests/unit/test_publish_leaves_tree_clean.py"
@@ -138,6 +139,8 @@ CONTRACT_STEP_REQUIRED = '            "validate-ci --issue-contract-body" in wor
 #: the fidelity of the shipped artifact, and the mechanism is whatever notices.
 SHIPPED_SCHEMA = "src/engineering_playbook/resources/.project/schemas/state.schema.json"
 ROOT_WORKFLOW = ".github/workflows/quality.yml"
+PYPROJECT = "pyproject.toml"
+LOCKFILE = "uv.lock"
 ORIGIN = "tests/unit/test_the_override_leaves_a_trace.py"
 
 # Long source fragments, named so the entries stay readable and the literals stay exact.
@@ -210,6 +213,12 @@ SHIPPED_SCHEMA_FIELD = '"$schema"'
 #: mutating either would prove nothing. This plants on the root side the kind of unmirrored edit
 #: #49 measured happening repeatedly by hand in a single session.
 ROOT_WORKFLOW_STEP = "      - name: Typecheck\n"
+#: Issue #76. The version-free prefix of the pin, so a version bump does not stale this literal:
+#: turning `==` back into `>=` is the open range the issue measured.
+PYRIGHT_PIN = '  "pyright=='
+#: The lock the running tool is compared against. Prefixing the version makes the locked value one
+#: no installed pyright can report, which is what a lock and an environment disagreeing looks like.
+PYRIGHT_LOCKED = 'name = "pyright"\nversion = "'
 #: A COMMENT, and deliberately nothing else. The structural comparison parses both copies, so
 #: YAML discards this line and the two still compare equal -- only the textual comparison
 #: between literal anchors sees it. Without this entry, half of the redundancy the matrix
@@ -511,6 +520,24 @@ MUTATIONS: tuple[Mutation, ...] = (
         proves=(
             f"{MIRROR}::test_the_shipped_workflow_is_the_root_workflow_minus_the_job_it_cannot_run",
         ),
+    ),
+    Mutation(
+        mechanism="a gate tool declared as a range is refused",
+        requirement="NFR-002, #76",
+        stage=10,
+        file=PYPROJECT,
+        find=PYRIGHT_PIN,
+        replace='  "pyright>=',
+        proves=(f"{PINS}::test_the_declared_version_is_the_locked_one[pyright]",),
+    ),
+    Mutation(
+        mechanism="a gate tool running another version than the lock is refused",
+        requirement="NFR-002, #76",
+        stage=10,
+        file=LOCKFILE,
+        find=PYRIGHT_LOCKED,
+        replace='name = "pyright"\nversion = "0.',
+        proves=(f"{PINS}::test_the_running_tool_is_the_locked_one[pyright]",),
     ),
     Mutation(
         mechanism="the shipped workflow matches the root outside the unshipped job, comments too",

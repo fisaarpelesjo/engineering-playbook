@@ -184,7 +184,7 @@ def speaking_portuguese() -> set[str]:
 
 
 #: Every tracked file that still carries Portuguese, measured on 2026-09-22: 113 files,
-#: 1589 lines, out of 255 tracked text files read.
+#: 1589 lines, out of 256 tracked text files read.
 #:
 #: This list is the work item of issue #65 made countable. It shrinks as translation lands, and
 #: the test below refuses both directions -- a file joining it, and a file that stopped needing

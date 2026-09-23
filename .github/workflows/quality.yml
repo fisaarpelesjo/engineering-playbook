@@ -162,6 +162,10 @@ jobs:
           version: "0.12.3"
       - name: Sync
         run: uv sync --locked
+      # The pyright wrapper fetches its engine on first use. The harness runs the #76 test
+      # twice per entry, so a fetch that fails there reads as a mechanism not held.
+      - name: Fetch the pyright engine
+        run: uv run pyright --version
       - name: Every mechanism is held by a test that fails without it
         run: uv run python scripts/mutation.py
   attest:

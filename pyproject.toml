@@ -30,8 +30,8 @@ engineering-playbook = "engineering_playbook.cli:main"
 [dependency-groups]
 dev = [
   "pytest>=8.3.0",
-  "ruff>=0.6.0",
-  "pyright>=1.1.380",
+  "ruff==0.16.6",
+  "pyright==1.1.411",
   "rich>=13.7.0",
 ]
 
