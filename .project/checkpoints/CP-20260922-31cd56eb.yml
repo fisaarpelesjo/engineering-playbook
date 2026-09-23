@@ -1,0 +1,46 @@
+schema_version: 1.0.0
+checkpoint_id: CP-20260922-31cd56eb
+created_at: '2026-09-22T20:09:08Z'
+workstream: WS-001
+task: T226
+branch: fix/064-no-stage-leaves-the-tree-dirty
+head: 1e5f97bf968b218fd85844e09a4b861822eb21f5
+working_tree:
+  status: clean
+  modified_paths: []
+completed_work:
+- Implemented playbook artifacts or recorded current progress.
+commands:
+- uv sync --locked
+- uv run ruff format --check .
+- uv run ruff check .
+- uv run pyright
+- uv run pytest
+- uv run python scripts/verify.py
+- uv run python scripts/doctor.py
+- uv run python scripts/resume.py
+- uv run python scripts/reconcile.py
+- uv run python scripts/bootstrap.py
+- uv run python scripts/delivery.py status
+- uv run python scripts/checkpoint.py
+- engineering-playbook checkpoint
+validation:
+  passed:
+  - uv sync --locked
+  - uv run ruff format --check .
+  - uv run ruff check .
+  - uv run pyright
+  - uv run pytest
+  - uv run python scripts/verify.py
+  - uv run python scripts/doctor.py
+  - uv run python scripts/resume.py
+  - uv run python scripts/reconcile.py
+  - uv run python scripts/bootstrap.py
+  - uv run python scripts/delivery.py status
+  - uv run python scripts/checkpoint.py
+  - engineering-playbook checkpoint
+  failed: []
+  not_run: []
+blockers: []
+next_action: Resume with uv run python scripts/resume.py before making further changes.
+battery_claim_divergent: false

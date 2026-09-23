@@ -1,15 +1,15 @@
 schema_version: 1.0.0
-updated_at: '2026-09-22T19:50:50Z'
+updated_at: '2026-09-22T20:09:08Z'
 active_workstream: WS-001
 current_branch: fix/064-no-stage-leaves-the-tree-dirty
-issue: 64
+issue: 46
 current_phase: implement
 status: in_progress
 active_specification: specs/003-no-stage-without-a-mechanism/spec.md
 active_plan: specs/003-no-stage-without-a-mechanism/plan.md
 active_tasks: specs/003-no-stage-without-a-mechanism/tasks.md
 active_task: T226
-last_checkpoint: .project/checkpoints/CP-20260922-94d0dd62.yml
+last_checkpoint: .project/checkpoints/CP-20260922-31cd56eb.yml
 last_verified_commit: 48639d309ec5fffa78082e655afddd999282a29f
 validation:
   passed:
