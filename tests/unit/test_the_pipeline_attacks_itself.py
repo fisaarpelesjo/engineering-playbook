@@ -66,6 +66,8 @@ PINNED_MECHANISMS = frozenset(
         "start records the issue it was given",
         "start drops the previous slice's pull request record",
         "prepare refuses a state that names another issue",
+        "a gate tool declared as a range is refused",
+        "a gate tool running another version than the lock is refused",
         "a specification claims the changed code",
         "a truncated file list is refused rather than reported on",
         "the escape must travel in the diff it excuses",

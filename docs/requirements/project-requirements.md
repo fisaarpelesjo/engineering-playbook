@@ -246,7 +246,7 @@ The repository contains, today:
 - A canonical process in `ENGINEERING.md` and an entry point in `AGENTS.md`, with thin adapters (`CLAUDE.md`, `.claude/agents/`, `docs/agents/`) that reference rather than restate.
 - A delivery pipeline, `scripts/delivery.py`, with the stages `start`, `prepare`, `commit`, `publish`, `merge --auto` and `status`, plus a `PreToolUse` hook that refuses raw `git` invocations which would bypass it.
 - A verification entry point, `scripts/verify.py`, and a doctor, `scripts/doctor.py`.
-- An adversarial harness, `scripts/mutation.py`, holding 37 mechanisms, each with the test that fails without it.
+- An adversarial harness, `scripts/mutation.py`, holding 39 mechanisms, each with the test that fails without it.
 - Four specifications under `specs/`, of which `003-no-stage-without-a-mechanism` carries the 20-stage coverage matrix.
 - A bootstrap path that installs a mirrored copy of the process into a derived project, with a parity test that refuses drift between the root and `src/engineering_playbook/resources/`.
 
